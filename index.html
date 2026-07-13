@@ -94,9 +94,13 @@
        padding:10px 12px}
  .card .l{font-size:.68em;color:var(--muted);text-transform:uppercase;
           letter-spacing:.08em;font-weight:700}
- /* first label in a card = a black header strip, like a stamped data plate */
+ /* first label in a card = a black header strip, like a stamped data plate.
+    Long-press the strip to fold the card down to just the header. */
  .card>.l:first-child{background:var(--ink);color:#F4F1EA;margin:-10px -12px 8px;
-          padding:4px 12px;letter-spacing:.1em}
+          padding:4px 12px;letter-spacing:.1em;user-select:none;-webkit-user-select:none}
+ .card.folded>*{display:none}
+ .card.folded>.l:first-child{display:block;margin-bottom:-10px}
+ .card.folded>.l:first-child::after{content:"  ▸"}
  .card .v{font-size:1.6em;font-weight:700;font-variant-numeric:tabular-nums}
  .ok{color:var(--ok)}.bad{color:var(--bad)}.best{color:var(--best)}
  #w_speed{display:flex;align-items:center;gap:10px;margin-bottom:10px}
@@ -297,7 +301,11 @@
   <div id="constatus" class="muted" style="text-align:center;margin:2px 2px 8px;
        font-size:.82em;min-height:1.1em"></div>
   <div id="livebody">
-   <div id="w_fs"><button class="b" style="margin-bottom:12px" onclick="enterFullDash()">FULL-SCREEN LIVE VIEW</button></div>
+   <div id="w_fs"><button class="b" style="margin-bottom:10px" onclick="enterFullDash()">FULL-SCREEN LIVE VIEW</button></div>
+   <div id="w_video" class="segrow">
+    <button class="b" style="margin-bottom:0" onclick="openCamView()">🎥 CAMERA</button>
+    <button class="b" style="margin-bottom:0" id="goproBtn" onclick="goproShutter()">GOPRO</button>
+   </div>
    <div id="w_speed">
     <div class="card">
      <div class="l" id="spdlabel">Speed km/h</div><div id="spd">0</div>
@@ -431,6 +439,8 @@
      <tbody id="anabody"></tbody></table>
     <div class="card" style="margin-bottom:10px"><div class="l">Sector analysis</div>
      <div id="anasec" style="font-size:.95em;margin-top:4px"></div></div>
+    <div class="card" style="margin-bottom:10px"><div class="l">Coach — tap 📍 to see it on the map</div>
+     <div id="anacoach" style="font-size:.95em;margin-top:4px"></div></div>
     <div class="card" style="margin-bottom:10px"><div class="l">Acceleration (best in this run)</div>
      <div id="anaaccel" style="font-size:.95em;margin-top:4px"></div></div>
     <div class="card" style="margin-bottom:10px"><div class="l">Compare two laps</div>
@@ -613,7 +623,7 @@ try{
 }catch(_){}
 // ---- user layout control: every live/full-dash widget can be hidden,
 // resized (S/M/L) and reordered from MENU → LIVE VIEW LAYOUT ----
-const LIVE_WIDGETS=[["w_fs","Full-screen button"],["w_speed","Speed + G"],
+const LIVE_WIDGETS=[["w_fs","Full-screen button"],["w_video","Camera / GoPro"],["w_speed","Speed + G"],
  ["minimap","Mini map"],["w_laps","Current / Best"],["w_delta","Delta"],
  ["splits","Splits row"],["w_session","Session button"],["w_obd","OBD"],
  ["w_status","Status"]];
@@ -1258,9 +1268,9 @@ function renderHistoryList(){
    +`<button class="b" style="background:var(--card2)" onclick="document.getElementById('impsess').click()">OPEN A SHARED SESSION</button>`;
   return;
  }
- const importBtn=`<button class="b" style="background:var(--card2);font-size:.92em;margin-bottom:11px"
-   onclick="document.getElementById('impsess').click()">OPEN A SHARED SESSION</button>`;
- list.innerHTML=note+importBtn+sorted.map(s=>{
+ // YOUR sessions get the space; imports live in a collapsed section below
+ const mine=sorted.filter(s=>!s.imported), shared=sorted.filter(s=>s.imported);
+ const card=s=>{
   const stage=s.mode==="stage", word=stage?"run":"lap", n=s.attempts.length;
   const best=n?Math.min(...s.attempts.map(a=>a.time)):null;
   const d=new Date(s.startedAt), live=s.id===db.activeSessionId;
@@ -1277,8 +1287,21 @@ function renderHistoryList(){
     <div class="bestcol"><div class="k">Best</div><div class="t">${best!=null?fmt(best):'--'}</div></div>
     <div class="chev">›</div>
    </div>`;
- }).join("");
+ };
+ const importBtn=`<button class="b" style="background:var(--card2);font-size:.9em;margin:8px 0"
+   onclick="document.getElementById('impsess').click()">OPEN A SHARED SESSION FILE</button>`;
+ const sharedSec=
+  `<div class="muted" style="padding:10px 2px 6px;font-size:.8em;font-weight:700;
+    text-transform:uppercase;letter-spacing:.05em;cursor:pointer" onclick="toggleShared()">
+    ${sharedOpen?"▾":"▸"} Shared with me (${shared.length})</div>`
+  +(sharedOpen ? shared.map(card).join("")+importBtn : "");
+ list.innerHTML=note
+  +(mine.length?mine.map(card).join("")
+   :'<div class="histempty">No sessions of your own yet — tap <b>START SESSION</b> on the Live tab.</div>')
+  +sharedSec;
 }
+let sharedOpen=false;
+function toggleShared(){ sharedOpen=!sharedOpen; renderHistoryList(); }
 // ---------------- the map-first session view ----------------
 // ONE tap on a History card opens this: hero satellite map with the driven
 // line at the best rate we have (50 Hz hi-res, else 10 Hz trail), scrubbable,
@@ -1655,9 +1678,13 @@ function openAna(title){
  }
  const v=document.getElementById("anaView");
  if(!v.classList.contains("up")){ v.classList.add("up"); navPush(); }
+ applyFolds();   // restore which cards the user keeps folded
  updateHiResBtn();
 }
-function closeAnaNow(){ document.getElementById("anaView").classList.remove("up"); }
+function closeAnaNow(){
+ replayStopPlayback();
+ document.getElementById("anaView").classList.remove("up");
+}
 function closeAna(){
  const was=document.getElementById("anaView").classList.contains("up");
  closeAnaNow();
@@ -1666,6 +1693,7 @@ function closeAna(){
 // Point the hero map at a sample array {t,la,lo,v,ay[,ax]} — the whole outing.
 let svFullSamples=null, svRateLabel="", svScope=null;  // svScope = viewing one lap/run
 function setupReplay(samples, rateLabel){
+ replayStopPlayback();
  svFullSamples=samples; svScope=null;
  const total=(samples[samples.length-1].t||0)-(samples[0].t||0);
  // honest rate label: what's actually drawn, not what was hoped for —
@@ -1681,6 +1709,7 @@ function setupReplay(samples, rateLabel){
 }
 function svShowFullRun(){ if(svFullSamples) setupReplay(svFullSamples, svRateLabel); }
 function clearReplayView(){
+ replayStopPlayback();
  replayData=null; replayCalc=null; svFullSamples=null; svScope=null; svRateLabel="";
  renderReplayBar();
  if(!replayMap) return;
@@ -1721,6 +1750,7 @@ let replayMap=null, replayLayers=[], replayCarMk=null, replayData=null;
 let replayCalc=null, replayMode="phase";
 let replayShowPts=true, replayShowG=true;
 let replayZones=true, replayPhases=null;   // ZONES: smoothed accel/brake regions
+let replayCorners=true;   // OFF folds corner zones into brake-in / power-out
 // At 25 Hz, per-sample phase colouring is confetti — a 50 ft acceleration is
 // ONE zone, not 30 dots. Classify on the speed slope over a ±0.35 s window,
 // then merge into zones, absorbing blips shorter than ~0.8 s into whichever
@@ -1758,7 +1788,10 @@ function smoothPhases(pts){
  while(changed && zones.length>1){
   changed=false;
   for(let k=0;k<zones.length;k++){
-   if(dur(zones[k])<0.8){
+   // corners toggled off: fold EVERY corner zone into its longer neighbour —
+   // on point-and-squirt courses the amber slivers are noise, and "brake in,
+   // power out" is how drivers read a corner anyway
+   if(dur(zones[k])<0.8 || (!replayCorners && zones[k].p==="corner")){
     const prev=zones[k-1], next=zones[k+1];
     const into=(prev&&next)?(dur(prev)>=dur(next)?prev:next):(prev||next);
     into.i0=Math.min(into.i0,zones[k].i0);
@@ -1782,6 +1815,7 @@ function viewAttemptReplay(sessId, idx){
   alert("No replay data saved for this run (recorded before this feature existed, or the run was too short).");
   return;
  }
+ replayStopPlayback();
  replayData=a;
  // reference for delta mode: fastest run in the same session that has samples
  const ref=s.attempts.filter(x=>x.samples&&x.samples.length>2)
@@ -1835,12 +1869,16 @@ function renderReplayBar(){
  const chip=(c,l)=>`<span style="font-size:.68em;color:var(--muted);white-space:nowrap">
   <span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${c};
    vertical-align:middle;margin-right:2px"></span>${l}</span>`;
- bar.innerHTML=modes.map(([m,l])=>btn(replayMode===m,l,`setReplayMode('${m}')`)).join("")
+ bar.innerHTML=btn(rpPlaying, rpPlaying?"❚❚ PAUSE":"▶ PLAY","replayPlayToggle()")
+  +btn(rpSpeed!==1, rpSpeed+"×","replaySpeedCycle()")
+  +modes.map(([m,l])=>btn(replayMode===m,l,`setReplayMode('${m}')`)).join("")
   +(replayMode==="phase"?btn(replayZones,replayZones?"ZONES":"RAW","toggleReplayOpt('zones')"):"")
+  +(replayMode==="phase"&&replayZones?btn(replayCorners,"CORNERS","toggleReplayOpt('corners')"):"")
   +btn(replayShowPts,"BRAKE/THR PTS","toggleReplayOpt('pts')")
   +btn(replayShowG,"CORNER G","toggleReplayOpt('g')")
   +(replayMode==="phase"
-    ?chip("#2c2","power")+chip("#e33","brake")+chip("#fb0","corner")+chip("#79c","coast")
+    ?chip("#2c2","power")+chip("#e33","brake")
+     +(replayCorners?chip("#fb0","corner"):"")+chip("#79c","coast")
     :"")
   +(svScope?btn(true,"✕ "+svScope+" — FULL RUN","svShowFullRun()")
            :(svRateLabel?`<span class="muted" style="font-size:.72em;padding:0 4px">FULL RUN · ${svRateLabel}</span>`:""));
@@ -1854,6 +1892,7 @@ function setReplayMode(m){
 function toggleReplayOpt(o){
  if(o==="pts") replayShowPts=!replayShowPts;
  else if(o==="zones") replayZones=!replayZones;
+ else if(o==="corners") replayCorners=!replayCorners;
  else replayShowG=!replayShowG;
  renderReplayBar(); drawReplayTrack();
 }
@@ -1944,16 +1983,51 @@ function drawReplayTrack(){
  if(allLatLng.length) replayMap.fitBounds(allLatLng,{padding:[24,24]});
  replayCarMk=L.marker(allLatLng[0]||[0,0],{icon:carIcon('id="replaycar"')}).addTo(replayMap);
 }
+// ---- real-time playback (the scrubber alone made replay feel like a chore) ----
+let rpPlaying=false, rpSpeed=1, rpRaf=null, rpLastTs=0, rpT=null;
+function replayStopPlayback(){
+ rpPlaying=false; rpT=null;
+ if(rpRaf){ cancelAnimationFrame(rpRaf); rpRaf=null; }
+}
+function replayPlayToggle(){
+ if(!replayData) return;
+ rpPlaying=!rpPlaying;
+ if(rpPlaying){
+  const pts=replayData.samples, t0=pts[0].t, tEnd=pts[pts.length-1].t;
+  if(rpT===null || rpT>=tEnd-0.05)
+   rpT=t0+(+document.getElementById("replaySlider").value/1000)*(tEnd-t0);
+  if(rpT>=tEnd-0.05) rpT=t0;          // at the end: play again from the start
+  rpLastTs=performance.now();
+  rpRaf=requestAnimationFrame(rpTick);
+ }
+ renderReplayBar();
+}
+function rpTick(ts){
+ if(!rpPlaying || !replayData){ rpPlaying=false; return; }
+ const pts=replayData.samples, t0=pts[0].t, tEnd=pts[pts.length-1].t;
+ rpT+=((ts-rpLastTs)/1000)*rpSpeed;
+ rpLastTs=ts;
+ if(rpT>=tEnd){ rpT=tEnd; rpPlaying=false; }
+ const val=1000*(rpT-t0)/((tEnd-t0)||1);
+ document.getElementById("replaySlider").value=val;
+ scrubReplay(val);
+ if(rpPlaying) rpRaf=requestAnimationFrame(rpTick);
+ else renderReplayBar();
+}
+function replaySpeedCycle(){
+ rpSpeed=rpSpeed===1?2:(rpSpeed===2?4:1);
+ renderReplayBar();
+}
 function scrubReplay(val){
  if(!replayData || !replayMap) return;
  const pts=replayData.samples;
  const t0=pts[0].t, total=pts[pts.length-1].t-t0;
  const tAbs=t0+(val/1000)*total;
- let idx=0, bd=1e9;
- for(let i=0;i<pts.length;i++){
-  const d=Math.abs(pts[i].t-tAbs);
-  if(d<bd){ bd=d; idx=i; }
- }
+ rpT=tAbs;   // manual scrub moves the playhead too
+ // binary search — the old full scan per tick was too heavy for playback
+ let lo=0, hi=pts.length-1;
+ while(lo<hi){ const m=(lo+hi)>>1; if(pts[m].t<tAbs) lo=m+1; else hi=m; }
+ const idx=(lo>0 && Math.abs(pts[lo-1].t-tAbs)<Math.abs(pts[lo].t-tAbs))?lo-1:lo;
  const p=pts[idx];
  if(replayCarMk) replayCarMk.setLatLng([p.la,p.lo]);
  document.getElementById("replayT").textContent=fmt(p.t-t0);
@@ -3718,6 +3792,90 @@ function camRecToggle(){
  cam.rec.start(1000);
 }
 
+// ---------------- GoPro remote (Open GoPro BLE) ----------------
+// Web Bluetooth can drive a GoPro's shutter (HERO9 and newer: pair once via
+// the camera's "Pair Device" menu). No preview over BLE — this is a remote
+// trigger whose value is TIMING: starting it from the app stamps the exact
+// data-time offset on the session, so the footage auto-syncs in VIDEO OVERLAY.
+let gopro={dev:null,cmd:null,on:false};
+async function goproConnect(){
+ if(!navigator.bluetooth){ alert("No Web Bluetooth in this browser."); return; }
+ try{
+  const dev=await navigator.bluetooth.requestDevice({
+   filters:[{namePrefix:"GoPro"}],
+   optionalServices:["0000fea6-0000-1000-8000-00805f9b34fb"]});
+  const server=await dev.gatt.connect();
+  const svc=await server.getPrimaryService("0000fea6-0000-1000-8000-00805f9b34fb");
+  gopro.cmd=await svc.getCharacteristic("b5f90072-aa8d-11e3-9046-0002a5d5c51b");
+  dev.addEventListener("gattserverdisconnected",()=>{
+   gopro.cmd=null; gopro.on=false; updateGoproBtn();
+  });
+  gopro.dev=dev;
+  updateGoproBtn();
+ }catch(e){
+  alert("GoPro: "+(e.message||e)
+   +"\n\nHERO9 or newer, and put the camera in pairing mode first "
+   +"(Preferences → Wireless Connections → Connect Device → GoPro Quik App).");
+ }
+}
+async function goproShutter(){
+ if(!gopro.cmd){ goproConnect(); return; }
+ const want=!gopro.on;
+ try{
+  await gopro.cmd.writeValue(new Uint8Array([3,1,1,want?1:0]));
+  gopro.on=want;
+  if(want){
+   // the app knows its clocks: stamp where in the data this clip begins
+   const as=activeSession();
+   if(as && sessTrack.length){ as.videoOffset=sessTrack[sessTrack.length-1].t; saveDb(); }
+   vibe([40]);
+  }
+ }catch(e){ alert("GoPro: "+(e.message||e)); }
+ updateGoproBtn();
+}
+function updateGoproBtn(){
+ const b=document.getElementById("goproBtn"); if(!b) return;
+ b.textContent=!gopro.cmd?"GOPRO":(gopro.on?"■ GOPRO REC":"● GOPRO READY");
+ b.style.background=gopro.on?"#1A1A1A":"";
+ b.style.color=gopro.on?"#F9F9F9":"";
+}
+
+// ---------------- long-press a card header to fold the card ----------------
+function foldKey(card){
+ const l=card.querySelector(".l");
+ return "fold_"+(l?l.textContent.trim().slice(0,40):"");
+}
+function toggleFold(card){
+ card.classList.toggle("folded");
+ settings.cardFolds=settings.cardFolds||{};
+ settings.cardFolds[foldKey(card)]=card.classList.contains("folded");
+ saveSettings();
+}
+function applyFolds(){
+ if(!settings.cardFolds) return;
+ document.querySelectorAll("#anaView .card").forEach(c=>{
+  c.classList.toggle("folded", !!settings.cardFolds[foldKey(c)]);
+ });
+}
+(function(){
+ let lpTimer=null, sx=0, sy=0;
+ const root=document.getElementById("anaView");
+ if(!root) return;
+ root.addEventListener("pointerdown",e=>{
+  const h=e.target.closest(".l");
+  if(!h || !h.parentElement.classList.contains("card") || h.parentElement.firstElementChild!==h) return;
+  sx=e.clientX; sy=e.clientY;
+  const card=h.parentElement;
+  lpTimer=setTimeout(()=>{ lpTimer=null; toggleFold(card); vibe([30]); },450);
+ });
+ const cancel=()=>{ if(lpTimer){ clearTimeout(lpTimer); lpTimer=null; } };
+ root.addEventListener("pointermove",e=>{
+  if(lpTimer && (Math.abs(e.clientX-sx)>8||Math.abs(e.clientY-sy)>8)) cancel();
+ });
+ root.addEventListener("pointerup",cancel);
+ root.addEventListener("pointercancel",cancel);
+})();
+
 // ---------------- phone GPS mode (no logger needed) ----------------
 // The phone's own GPS as a position source: ~1 Hz on most Androids, no IMU,
 // looser accuracy — a backup timer when the logger isn't along, not a
@@ -4083,6 +4241,99 @@ function renderSectorAnalysis(laps,best,nSec){
  }).join("");
  el.innerHTML=html;
 }
+// ---------------- deterministic coach ----------------
+// Knows the LAP (zones, sectors, speeds, consistency) and the APP (every
+// insight can drive the hero map). Pure computation — no network, no
+// hallucination, works in the paddock.
+function computeCoach(laps,best){
+ const rows=[];
+ const real=laps.filter(l=>!l.out);
+ if(real.length>=3){
+  const ts=real.map(l=>l.time), m=ts.reduce((a,b)=>a+b,0)/ts.length;
+  const sd=Math.sqrt(ts.reduce((a,b)=>a+(b-m)*(b-m),0)/ts.length);
+  const pct=100*sd/m;
+  rows.push({txt:`Consistency ±${sd.toFixed(2)}s across ${real.length} laps (${pct.toFixed(1)}%). `
+   +(pct<1?"Metronomic — chase pace, not repeatability."
+    :pct<2.5?"Solid — safe to experiment with lines."
+    :"Big spread — repeat ONE line before hunting tenths.")});
+ }
+ const R=best.rows;
+ if(R.length>10){
+  const bl=R.map(r=>({t:r.t, v:r.spd, ay:r.ay}));
+  const ph=smoothPhases(bl);
+  const d0=R[0].d, dTot=R[R.length-1].d-d0||1;
+  const pctAt=i=>Math.round(100*(R[i].d-d0)/dTot);
+  // zone list
+  const zs=[];
+  for(let i=0;i<ph.length;i++){
+   if(!zs.length||zs[zs.length-1].p!==ph[i]) zs.push({p:ph[i],i0:i,i1:i});
+   else zs[zs.length-1].i1=i;
+  }
+  const dur=z=>R[z.i1].t-R[z.i0].t;
+  // dead time: the longest coast zones on the best lap
+  zs.filter(z=>z.p==="coast"&&dur(z)>1).sort((a,b)=>dur(b)-dur(a)).slice(0,2).forEach(z=>{
+   rows.push({t:R[z.i0].t,
+    txt:`${dur(z).toFixed(1)}s of coasting at ~${pctAt(z.i0)}% distance — commit earlier: brake or power, not neither.`});
+  });
+  // braking profile
+  const brakes=zs.filter(z=>z.p==="brake");
+  if(brakes.length){
+   const longest=brakes.reduce((a,b)=>dur(b)>dur(a)?b:a);
+   rows.push({t:R[longest.i0].t,
+    txt:`${brakes.length} braking zones; the longest lasts ${dur(longest).toFixed(1)}s into ~${pctAt(longest.i1)}% — prime spot to try braking later/harder.`});
+  }
+  // top speed + peak corner
+  const iV=R.reduce((a,b,i)=>R[a].spd>=b.spd?a:i,0);
+  rows.push({t:R[iV].t, txt:`Top speed ${kmhOrMph(R[iV].spd).toFixed(0)} ${speedUnit()} at ~${pctAt(iV)}%.`});
+  let iG=0; for(let i=0;i<R.length;i++) if(Math.abs(R[i].ay||0)>Math.abs(R[iG].ay||0)) iG=i;
+  if(Math.abs(R[iG].ay||0)>0.4)
+   rows.push({t:R[iG].t, txt:`Peak cornering ${Math.abs(R[iG].ay).toFixed(1)}g at ~${pctAt(iG)}% — your grip ceiling today; corners well below it have margin left.`});
+ }
+ return rows;
+}
+function renderCoach(laps,best){
+ const el=document.getElementById("anacoach"); if(!el) return;
+ let rows=[];
+ try{ rows=computeCoach(laps,best); }catch(_){}
+ el.innerHTML=rows.length
+  ? rows.map(r=>`<div style="padding:3px 0;${r.t!=null?"cursor:pointer":""}"
+     ${r.t!=null?`onclick="coachJump(${r.t.toFixed(2)})"`:""}>${r.t!=null?"📍 ":""}${r.txt}</div>`).join("")
+  : '<span class="muted">Not enough data for coaching on this session.</span>';
+}
+function coachJump(tAbs){
+ if(svScope) svShowFullRun();   // the insight times live on the full-run axis
+ setTimeout(()=>{
+  if(!replayData) return;
+  const pts=replayData.samples, t0=pts[0].t, tEnd=pts[pts.length-1].t;
+  const val=Math.max(0,Math.min(1000,1000*(tAbs-t0)/((tEnd-t0)||1)));
+  document.getElementById("replaySlider").value=val;
+  scrubReplay(val);
+  document.getElementById("replayMap").scrollIntoView({behavior:"smooth"});
+ }, svScope?200:0);
+}
+// tap-to-read for the charts (axes carry units, taps carry values)
+function wireChartReadout(id, fn){
+ const c=document.getElementById(id); if(!c) return;
+ let out=document.getElementById(id+"_ro");
+ if(!out){
+  out=document.createElement("div");
+  out.id=id+"_ro"; out.className="muted";
+  out.style.cssText="margin-top:4px;font-size:.85em;min-height:1.1em";
+  c.parentNode.appendChild(out);
+ }
+ out.textContent="tap the chart to read values";
+ c.onclick=e=>{
+  const r=c.getBoundingClientRect();
+  const frac=Math.max(0,Math.min(1,(e.clientX-r.left-5)/(r.width-10)));
+  out.textContent=fn(frac);
+ };
+}
+function speedAtFrac(l,frac){
+ const d0=l.rows[0].d, dTot=l.rows[l.rows.length-1].d-d0||1, target=d0+frac*dTot;
+ let i=l.rows.findIndex(p=>p.d>=target); if(i<1) i=1;
+ const a=l.rows[i-1], b=l.rows[i], f=(target-a.d)/((b.d-a.d)||1);
+ return a.spd+f*(b.spd-a.spd);
+}
 let anaLaps=null;
 function renderCompare(){
  if(!anaLaps || anaLaps.length<2) return;
@@ -4178,6 +4429,7 @@ function renderAnalysis(laps,best,I,fname,accel){
     `<td>${l.out?"":(l.sec[i]!=null?l.sec[i].toFixed(2):"--")}</td>`).join("")
   +"</tr>").join("");
  renderSectorAnalysis(laps.filter(l=>!l.out),best,nSec);
+ renderCoach(laps,best);
  // populate lap-comparison pickers: default best vs second best (real laps only)
  const sorted=[...laps].filter(l=>!l.out).sort((a,b)=>a.time-b.time);
  const opts=laps.filter(l=>!l.out).map(l=>
@@ -4205,8 +4457,15 @@ function renderAnalysis(laps,best,I,fname,accel){
    x.stroke();
   });
   x.globalAlpha=1; x.fillStyle=MUT; x.font="11px sans-serif";
-  x.fillText(vmax.toFixed(0)+" km/h max — thick line = best lap",8,12);
+  x.fillText("y: 0–"+vmax.toFixed(0)+" km/h · thick = best lap",8,12);
+  x.fillText("x: lap distance 0→100%",w-140,h-4);
  }
+ wireChartReadout("anaspd", frac=>{
+  const others=laps.filter(l=>!l.out&&l!==best).map(l=>
+   `L${l.n} ${kmhOrMph(speedAtFrac(l,frac)).toFixed(0)}`).slice(0,3).join(" · ");
+  return `at ${(frac*100).toFixed(0)}%: best lap ${kmhOrMph(speedAtFrac(best,frac)).toFixed(0)} ${speedUnit()}`
+   +(others?` · ${others}`:"");
+ });
  // --- delta vs distance (only meaningful with 2+ laps)
  if(!single){
   const [x,w,h]=cv2d("anadel",170);
@@ -4233,7 +4492,13 @@ function renderAnalysis(laps,best,I,fname,accel){
    x.stroke();
   });
   x.fillStyle=MUT; x.font="11px sans-serif";
-  x.fillText("±"+dmax.toFixed(1)+" s vs best (lap "+best.n+")",8,12);
+  x.fillText("y: ±"+dmax.toFixed(1)+"s vs best lap "+best.n+" (above line = losing time)",8,12);
+  x.fillText("x: lap distance 0→100%",w-140,h-4);
+  wireChartReadout("anadel", frac=>{
+   const vals=laps.filter(l=>l!==best&&!l.out).slice(0,4).map(l=>
+    `L${l.n} ${(elapsedAt(l,frac)-elapsedAt(best,frac)>=0?"+":"")}${(elapsedAt(l,frac)-elapsedAt(best,frac)).toFixed(2)}s`);
+   return `at ${(frac*100).toFixed(0)}%: `+vals.join(" · ");
+  });
  }
  // --- g-g
  {
