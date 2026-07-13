@@ -1,4 +1,10 @@
 <!DOCTYPE html>
+<!--
+  RaceLogger — © 2026 Josh "Yoshi" Retief. All rights reserved.
+  Proprietary software: personal use via the official site is permitted;
+  copying, re-hosting, redistribution, or commercial use is not.
+  See the LICENSE file. Contact: joshretief@gmail.com
+-->
 <!-- v3.1: always-on recording, timing/session merge, on-phone session replay/analyze -->
 <!-- RaceLogger dashboard v3 — Web Bluetooth (Chrome on Android) + GPS map.
      Host on HTTPS (GitHub Pages) for BLE. DEMO mode works from anywhere,
@@ -1711,8 +1717,15 @@ function smoothPhases(pts){
   let j0=i, j1=i;
   while(j0>0 && pts[i].t-pts[j0-1].t<0.35) j0--;
   while(j1<n-1 && pts[j1+1].t-pts[i].t<0.35) j1++;
-  const dt=pts[j1].t-pts[j0].t;
-  const dvdt=dt>0.05?((pts[j1].v||0)-(pts[j0].v||0))/dt:0;
+  // slope from the MEANS of the window's two halves, not its two endpoints —
+  // endpoint differences amplify GPS speed noise enough to flip samples
+  // across the thresholds mid-corner and shred the zones
+  let s0=0,c0=0,s1=0,c1=0;
+  for(let j=j0;j<=j1;j++){
+   if(j<=i){ s0+=pts[j].v||0; c0++; } else { s1+=pts[j].v||0; c1++; }
+  }
+  const dt=(pts[j1].t-pts[j0].t)/2;
+  const dvdt=(c0&&c1&&dt>0.05)?((s1/c1)-(s0/c0))/dt:0;
   ph[i]=classifyPhase(dvdt, pts[i].ay).phase;
  }
  // run-length zones
@@ -1800,10 +1813,16 @@ function renderReplayBar(){
   color:${act?"var(--accent-ink)":"var(--fg)"};border:2px solid var(--ink);
   border-radius:2px;padding:7px 10px;
   font-weight:700;font-size:.78em" onclick="${cb}">${label}</button>`;
+ const chip=(c,l)=>`<span style="font-size:.68em;color:var(--muted);white-space:nowrap">
+  <span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${c};
+   vertical-align:middle;margin-right:2px"></span>${l}</span>`;
  bar.innerHTML=modes.map(([m,l])=>btn(replayMode===m,l,`setReplayMode('${m}')`)).join("")
   +(replayMode==="phase"?btn(replayZones,replayZones?"ZONES":"RAW","toggleReplayOpt('zones')"):"")
   +btn(replayShowPts,"BRAKE/THR PTS","toggleReplayOpt('pts')")
   +btn(replayShowG,"CORNER G","toggleReplayOpt('g')")
+  +(replayMode==="phase"
+    ?chip("#2c2","power")+chip("#e33","brake")+chip("#fb0","corner")+chip("#79c","coast")
+    :"")
   +(svScope?btn(true,"✕ "+svScope+" — FULL RUN","svShowFullRun()")
            :(svRateLabel?`<span class="muted" style="font-size:.72em;padding:0 4px">FULL RUN · ${svRateLabel}</span>`:""));
 }
@@ -2484,19 +2503,37 @@ function checkSplits(){
 // the lap replay below estimate accelerating/braking from the TREND in GPS
 // speed itself (dv/dt), and turning from the lateral g that's already sent.
 // Same thresholds are shared so live and replay agree.
-const ACCEL_THRESH=0.5, BRAKE_THRESH=0.7, TURN_G=0.3;   // m/s^2, m/s^2, g
+const ACCEL_THRESH=0.5, BRAKE_THRESH=0.7, TURN_G=0.35;   // m/s^2, m/s^2, g
+// Four phases, because constant speed at 1.2g lateral is NOT coasting — it's
+// CORNERING (the traction budget is going sideways). Speed-only classification
+// painted most of a tight course "coast", which read as nonsense (field
+// report). Coast is now the rare, telling label: no accel, no brake, no
+// meaningful lateral — genuine dead time a coach would circle.
 function classifyPhase(dvdt, ay){
  const turning=Math.abs(ay||0)>TURN_G;
- let phase="coast";
+ let phase;
  if(dvdt>ACCEL_THRESH) phase="accel";
  else if(dvdt<-BRAKE_THRESH) phase="brake";
+ else if(turning) phase="corner";
+ else phase="coast";
  return {phase, turning};
 }
-function phaseColor(phase){ return phase==="accel"?"#2c2":(phase==="brake"?"#e33":"#dd0"); }
+function phaseColor(phase){
+ return phase==="accel"?"#2c2"
+  :phase==="brake"?"#e33"
+  :phase==="corner"?"#fb0"      // amber: hard work, just not longitudinal
+  :"#79c";                      // blue-grey: dead time — should be rare
+}
 // text version — the bright map-line colours wash out on the cream theme
-function phaseInk(phase){ return phase==="accel"?"var(--ok)":(phase==="brake"?"var(--bad)":"var(--best)"); }
+function phaseInk(phase){
+ return phase==="accel"?"var(--ok)"
+  :phase==="brake"?"var(--bad)"
+  :phase==="corner"?"var(--best)"
+  :"var(--muted)";
+}
 function phaseLabel(phase, turning){
  // short fixed-width labels so the replay HUD box never wraps or resizes
+ if(phase==="corner") return "CORNER";
  const base=phase==="accel"?"ACCEL":(phase==="brake"?"BRAKE":"COAST");
  return turning?base+" +TURN":base;
 }
