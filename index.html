@@ -452,6 +452,14 @@
      <div id="anasec" style="font-size:.95em;margin-top:4px"></div></div>
     <div class="card" style="margin-bottom:10px"><div class="l">Coach — tap 📍 to see it on the map</div>
      <div id="anacoach" style="font-size:.95em;margin-top:4px"></div></div>
+    <div class="card" style="margin-bottom:10px"><div class="l">Venue leaderboard</div>
+     <div id="lbBody" class="muted" style="font-size:.95em;margin-top:4px">tap REFRESH to load</div>
+     <div class="segrow" style="margin-top:8px">
+      <button class="minib" onclick="lbRefresh()">REFRESH</button>
+      <button class="minib" style="background:var(--best);color:#1A1A1A"
+       onclick="lbSubmit()">SUBMIT MY BEST</button>
+     </div>
+    </div>
     <div class="card" style="margin-bottom:10px"><div class="l">Acceleration (best in this run)</div>
      <div id="anaaccel" style="font-size:.95em;margin-top:4px"></div></div>
     <div class="card" style="margin-bottom:10px"><div class="l">Compare two laps</div>
@@ -1573,6 +1581,67 @@ function clearFocus(trackId){
  delete venueFor(trackId).focus;
  saveDb();
  if(lastCoach) renderCoach(lastCoach.laps,lastCoach.best);
+}
+// ---------------- venue leaderboards (Netlify Blobs backend) ----------------
+// Venue key = physical start-line position (3 dp ≈ 100 m) + mode + lap-length
+// bucket, so every phone at the same track+layout lands on the same board.
+function venueKeyFor(s, best){
+ const t=db.tracks.find(x=>x.id===s.trackId);
+ if(!t) return null;
+ const sg=(t.gates||[]).find(g=>g.role==="startfinish"||g.role==="start");
+ if(!sg) return null;
+ const len=best?Math.max(1,Math.round((best.rows[best.rows.length-1].d-best.rows[0].d)/100)):0;
+ return (sg.la.toFixed(3)+"x"+sg.lo.toFixed(3)+"x"+(t.mode||"loop")+"x"+len).toLowerCase();
+}
+async function lbRefresh(){
+ const el=document.getElementById("lbBody"); if(!el) return;
+ const s=anaSessionId?db.sessions.find(x=>x.id===anaSessionId):null;
+ if(!s || !lastCoach){ el.textContent="Open a session with laps first."; return; }
+ const key=venueKeyFor(s,lastCoach.best);
+ if(!key){ el.textContent="This track has no start line set."; return; }
+ el.textContent="Loading…";
+ try{
+  const r=await fetch("/api/lb/"+encodeURIComponent(key));
+  if(!r.ok) throw new Error("server "+r.status);
+  const {top,count}=await r.json();
+  el.innerHTML=(top.length?top.map((e,i)=>
+    `<div style="display:flex;gap:8px;align-items:center;padding:2px 0">
+      <span style="width:1.8em;font-weight:700">${i+1}.</span>
+      <span style="flex:1;overflow:hidden;text-overflow:ellipsis">${e.driver}</span>
+      <span style="font-variant-numeric:tabular-nums;font-weight:700">${fmt(e.time)}</span>
+      ${e.sid?`<button class="minib" style="font-size:.75em" onclick="lbView('${e.sid}')">VIEW</button>`:""}
+     </div>`).join("")
+   :"No entries yet — set the first time.")
+  +`<div class="muted" style="margin-top:4px;font-size:.78em">${count} entr${count===1?"y":"ies"} ·
+     best per driver · club-trust, times unverified — VIEW opens the actual lap</div>`;
+ }catch(e){
+  el.textContent="Couldn't load ("+(e.message||e)+"). Online, and backend deployed?";
+ }
+}
+async function lbSubmit(){
+ const s=anaSessionId?db.sessions.find(x=>x.id===anaSessionId):null;
+ if(!s || s.imported || !lastCoach){ alert("Open one of your OWN sessions with laps first."); return; }
+ if(!settings.driverName){ setDriverName(); if(!settings.driverName) return; }
+ const key=venueKeyFor(s,lastCoach.best);
+ if(!key){ alert("Set a start line on this track first."); return; }
+ const best=lastCoach.best;
+ if(!confirm(`Submit ${fmt(best.time)} as ${settings.driverName}?\n\nYour session uploads too, so others can VIEW the lap.`)) return;
+ try{
+  const r1=await fetch("/api/session",{method:"POST",
+   headers:{"content-type":"application/json"}, body:JSON.stringify(sessionBundle(s))});
+  const sid=r1.ok?(await r1.json()).id:null;
+  const r=await fetch("/api/lb",{method:"POST",
+   headers:{"content-type":"application/json"},
+   body:JSON.stringify({key, driver:settings.driverName, time:+best.time.toFixed(2), sid})});
+  if(!r.ok) throw new Error("server "+r.status);
+  lbRefresh();
+ }catch(e){ alert("Couldn't submit: "+(e.message||e)); }
+}
+function lbView(sid){
+ fetch("/api/session/"+sid)
+  .then(r=>{ if(!r.ok) throw new Error("server "+r.status); return r.json(); })
+  .then(b=>{ const id=importBundle(b); if(id){ renderHistory(); openSessionView(id); } })
+  .catch(e=>alert("Couldn't open that lap: "+(e.message||e)));
 }
 function sessLabel(s){
  return (s.driver?s.driver+" · ":"")+s.trackName+" · "
