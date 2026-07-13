@@ -1292,7 +1292,7 @@ function openSessionView(sessId){
   db.active=s.trackId; saveDb(); refreshTrackSel(); renumberSplits();
  }
  const hr=sessionHiRes(s), hires=hr.length>=20;
- const src=hires?hr:sessionTrail(s);
+ let src=hires?hr:sessionTrail(s);   // let: repairTimeAxis may replace it below
  const d=new Date(s.startedAt);
  const title=`${s.trackName} · ${d.toLocaleDateString([],{month:'short',day:'numeric'})} ${d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`;
  openAna(title);
