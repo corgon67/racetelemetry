@@ -1657,6 +1657,35 @@ async function lbSubmit(){
  }catch(e){ alert("Couldn't submit: "+(e.message||e)); }
 }
 // ---------------- tracks & venues browser ----------------
+// nearest town via OpenStreetMap reverse geocoding — fetched ONCE per track
+// (cached on the track, incl. "nothing found"), polite 1-at-a-time lookups
+async function townFor(t){
+ if(t.town!==undefined) return t.town;
+ const sg=(t.gates||[]).find(g=>g.role==="startfinish"||g.role==="start")
+  ||((t.outline&&t.outline.length)?{la:t.outline[0][0],lo:t.outline[0][1]}:null);
+ if(!sg) return null;   // no position yet — try again once gates exist
+ try{
+  const r=await fetch("https://nominatim.openstreetmap.org/reverse?format=jsonv2"
+   +"&lat="+sg.la.toFixed(5)+"&lon="+sg.lo.toFixed(5)+"&zoom=12&accept-language=en");
+  if(!r.ok) throw 0;
+  const a=(await r.json()).address||{};
+  t.town=a.town||a.village||a.city||a.suburb||a.municipality||a.county||null;
+  saveDb();
+  return t.town;
+ }catch(_){ return null; }   // offline etc — not cached, retried next open
+}
+async function fillTowns(){
+ for(const t of db.tracks){
+  if(t.town!==undefined){
+   const el=document.getElementById("town_"+t.id);
+   if(el&&t.town) el.textContent=" · "+t.town;
+   continue;
+  }
+  const town=await townFor(t);
+  const el=document.getElementById("town_"+t.id);
+  if(el&&town) el.textContent=" · "+town;
+ }
+}
 function openTracksView(){
  renderTracksView();
  const el=document.getElementById("tracksView");
@@ -1676,7 +1705,8 @@ function renderTracksView(){
   const trend=(v.pbHistory&&v.pbHistory.length>1)
    ? v.pbHistory.slice(-4).map(p=>fmt(p.time)).join(" → ") : null;
   return `<div class="card" style="margin-bottom:12px">
-   <div class="l">${t.name}${t.id===db.active?" · ACTIVE":""}</div>
+   <div class="l">${t.name}<span id="town_${t.id}" style="font-weight:400;text-transform:none;
+     letter-spacing:.02em;opacity:.75">${t.town?" · "+t.town:""}</span>${t.id===db.active?" · ACTIVE":""}</div>
    <div style="margin-top:6px">
     <span class="badge ${t.mode==="stage"?"stage":"loop"}">${t.mode==="stage"?"STAGE":"LOOP"}</span>
     ${(t.outline&&t.outline.length>2)?'<span class="badge" style="background:#3B3835;color:#F4F1EA">WALKED</span>':""}
@@ -1695,6 +1725,7 @@ function renderTracksView(){
    <div id="lbt_${t.id}" class="muted" style="font-size:.9em;margin-top:6px"></div>
   </div>`;
  }).join("") || '<div class="histempty">No tracks yet — make one on the MAP tab.</div>';
+ fillTowns();   // async, cached after the first lookup
 }
 async function lbLoadInto(elId, trackId){
  const el=document.getElementById(elId); if(!el) return;
