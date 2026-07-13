@@ -369,6 +369,8 @@
   <div id="mapwrap">
    <div id="map"></div>
    <button id="walkBtn" class="mapfab" style="top:10px;left:10px" onclick="toggleWalk()">RECORD TRACK (WALK)</button>
+   <button id="outlineBtn" class="mapfab" style="bottom:10px;left:10px;display:none"
+    onclick="toggleOutline()">OUTLINE</button>
    <button id="meBtn" class="mapfab" style="bottom:10px;right:10px" onclick="centerOnMe()">FOLLOW</button>
   </div>
  </div>
@@ -3106,15 +3108,79 @@ function removeGate(id){
 // saved walked track outline (persists across sessions, separate from the
 // live driven trail which is capped and session-only)
 function drawOutline(){
- const o=tr().outline;
+ const t=tr(), o=t.outline;
+ const show=o && o.length>1 && !t.outlineHidden;   // per-track visibility toggle
  if(map){
   if(outlineLine) map.removeLayer(outlineLine);
-  outlineLine=(o&&o.length>1)?L.polyline(o,{color:"#888",weight:3,opacity:.6,dashArray:"2 8"}).addTo(map):null;
+  outlineLine=show?L.polyline(o,{color:"#888",weight:3,opacity:.6,dashArray:"2 8"}).addTo(map):null;
  }
  if(mini){
   if(outlineLineMini) mini.removeLayer(outlineLineMini);
-  outlineLineMini=(o&&o.length>1)?L.polyline(o,{color:"#888",weight:3,opacity:.6,dashArray:"2 8"}).addTo(mini):null;
+  outlineLineMini=show?L.polyline(o,{color:"#888",weight:3,opacity:.6,dashArray:"2 8"}).addTo(mini):null;
  }
+ const b=document.getElementById("outlineBtn");
+ if(b){
+  b.style.display=(o&&o.length>1)?"block":"none";
+  b.classList.toggle("on",!!show);
+ }
+}
+function toggleOutline(){ tr().outlineHidden=!tr().outlineHidden; saveDb(); drawOutline(); }
+// ---- geometry along the walked outline (auto-splits + snapping) ----
+function outlineCum(o){
+ const cum=[0];
+ for(let i=1;i<o.length;i++)
+  cum.push(cum[i-1]+distM(o[i-1][0],o[i-1][1],o[i][0],o[i][1]));
+ return cum;
+}
+function nearestOutlineIdx(la,lo,o){
+ let bi=0, bd=1e18;
+ for(let i=0;i<o.length;i++){
+  const d=distM(la,lo,o[i][0],o[i][1]);
+  if(d<bd){ bd=d; bi=i; }
+ }
+ return {i:bi, d:bd};
+}
+function outlinePointAt(o,cum,target){
+ let i=1;
+ while(i<cum.length && cum[i]<target) i++;
+ i=Math.min(i,cum.length-1);
+ const f=(target-cum[i-1])/((cum[i]-cum[i-1])||1);
+ return {la:o[i-1][0]+(o[i][0]-o[i-1][0])*f, lo:o[i-1][1]+(o[i][1]-o[i-1][1])*f, i};
+}
+// Auto-place N splits along the walked track: evenly by DISTANCE, measured
+// from the start/finish around the loop (or between start and finish in stage
+// mode), each line perpendicular to the local outline direction.
+function autoSplits(){
+ const t=tr(), o=t.outline;
+ if(!o || o.length<10){ alert("Walk the track first — auto-splits follow the walked outline."); return; }
+ const nStr=prompt("How many splits?","2");
+ if(nStr===null) return;
+ const n=Math.max(1,Math.min(8,parseInt(nStr)||2));
+ const old=(t.gates||[]).filter(g=>g.role==="split");
+ if(old.length && !confirm(`Replace the ${old.length} existing split${old.length===1?"":"s"}?`)) return;
+ t.gates=(t.gates||[]).filter(g=>g.role!=="split");
+ const cum=outlineCum(o), total=cum[cum.length-1]||1;
+ const sg=startGate(), fg=t.mode==="stage"?gate("finish"):null;
+ const targets=[];
+ if(t.mode==="stage" && sg && fg){
+  const a=cum[nearestOutlineIdx(sg.la,sg.lo,o).i], b=cum[nearestOutlineIdx(fg.la,fg.lo,o).i];
+  const from=Math.min(a,b), span=Math.abs(b-a)||total;
+  for(let k=1;k<=n;k++) targets.push(from+span*k/(n+1));
+ }else{
+  const off=sg?cum[nearestOutlineIdx(sg.la,sg.lo,o).i]:0;
+  for(let k=1;k<=n;k++) targets.push((off+total*k/(n+1))%total);
+ }
+ for(const target of targets){
+  const p=outlinePointAt(o,cum,target);
+  const j0=Math.max(0,p.i-2), j1=Math.min(o.length-1,p.i+2);
+  const hd=(bearingDeg(o[j0][0],o[j0][1],o[j1][0],o[j1][1])+90)%360;
+  t.gates.push({id:"g"+Date.now()+Math.random().toString(36).slice(2,6), role:"split",
+   name:"Split", code:"S", la:p.la, lo:p.lo, heading:hd,
+   width:settings.gateWidthDefault||GATE_DEFAULT_WIDTH});
+ }
+ renumberSplits();
+ saveDb(); redrawMarks(); renderSplitsRow(); syncGate();
+ alert(`${n} split${n===1?"":"s"} placed along the walked track. Tap any line to fine-tune with the drag handles.`);
 }
 function toggleWalk(){
  const btn=document.getElementById("walkBtn");
@@ -3132,11 +3198,13 @@ function toggleWalk(){
   btn.style.background="";
   if(walkBuf.length<3){ alert("Not enough GPS points recorded — stay connected over BLE and walk a bit further."); return; }
   tr().outline=walkBuf.slice();
+  tr().outlineHidden=false;
   renumberSplits();   // a fresh outline is the best reference for split ordering
   saveDb();
   drawOutline();
   redrawMarks(); renderSplitsRow();
-  alert(`Saved a ${walkBuf.length}-point track map for "${tr().name}". Export it from the Laps tab (GPX) if you'd like a backup.`);
+  if(confirm(`Saved a ${walkBuf.length}-point track map for "${tr().name}".\n\nAuto-place splits along it now?`))
+   autoSplits();
  }
 }
 // ME button is a toggle: ON = keep snapping the view back to the car as it
@@ -3194,7 +3262,12 @@ function showSheet(){
   <div class="muted" style="text-align:center;margin-bottom:8px">
    separate start + finish = point-to-point runs (autocross/stage)</div>
   <button class="b" style="background:var(--accent);color:var(--accent-ink);padding:12px"
-   onclick="placeGate('split')">ADD SPLIT</button>`;
+   onclick="placeGate('split')">ADD SPLIT</button>`
+  +((tr().outline&&tr().outline.length>2)
+   ?`<button class="b" style="background:var(--card2);padding:12px"
+      onclick="hideSheet();autoSplits()">✨ AUTO-PLACE SPLITS ALONG WALKED TRACK</button>
+     <div class="muted" style="text-align:center;margin-bottom:6px">taps near the walked line snap onto it</div>`
+   :"");
  sheetUp();
 }
 // the bottom sheet is one back-stack layer: pushed when it first opens,
@@ -3252,6 +3325,15 @@ function suggestHeading(){
 }
 function placeGate(role){
  if(!tapLatLng){ hideSheet(); return; }
+ // taps near the walked outline SNAP to it — start/finish and splits land
+ // exactly on the track you walked, placed any time after the walk
+ {
+  const o=tr().outline;
+  if(o && o.length>2){
+   const nr=nearestOutlineIdx(tapLatLng.lat, tapLatLng.lng, o);
+   if(nr.d<30) tapLatLng={lat:o[nr.i][0], lng:o[nr.i][1]};
+  }
+ }
  // auto-switch timing mode to match what's being placed
  if(role==="startfinish" && tr().mode!=="loop") setMode("loop");
  if((role==="start"||role==="finish") && tr().mode!=="stage") setMode("stage");
