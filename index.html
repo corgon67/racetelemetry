@@ -1102,6 +1102,34 @@ function updateSessBanner(){
  info.textContent=`${n} ${word}${n===1?"":"s"} so far · started `
   +new Date(s.startedAt).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"});
 }
+// Burst-corrupted time axis (old firmware stamped arrival time; Chrome
+// replayed queued packets ms apart): many steps that cover real distance in
+// implausibly little time.
+function trailAxisBroken(src){
+ let moved=0, squashed=0;
+ for(let i=1;i<src.length;i++){
+  const dt=(src[i].t||0)-(src[i-1].t||0);
+  const d=distM(src[i-1].la,src[i-1].lo,src[i].la,src[i].lo);
+  if(d>5){ moved++; if(dt<0.05) squashed++; }
+ }
+ return moved>10 && squashed/moved>0.05;
+}
+// ...and the repair: positions and device-reported speeds in such trails are
+// still trustworthy — only the clock lied. Rebuild it as distance ÷ speed.
+// Good enough for phases/zones and ~1–2% lap times; parked time collapses,
+// which timing never cared about anyway.
+function repairTimeAxis(src){
+ const out=src.map(p=>Object.assign({},p));
+ let t=0;
+ out[0].t=0;
+ for(let i=1;i<out.length;i++){
+  const d=distM(out[i-1].la,out[i-1].lo,out[i].la,out[i].lo);
+  const v=Math.max(0.5,((out[i-1].v||0)+(out[i].v||0))/2);
+  t+=Math.max(0.02,Math.min(5,d/v));
+  out[i].t=t;
+ }
+ return out;
+}
 // Out-lap threshold: median of the FASTEST cluster × 1.5. A plain median of
 // all laps fails as soon as half of them are paddock loops — in the ARP field
 // data (real laps ~89 s, paddock 233–324 s) the median landed at 233 s and
@@ -1275,28 +1303,21 @@ function openSessionView(sessId){
   anaMsg("No trail saved for this session — full replay & analysis are saved for sessions recorded from now on.");
   return;
  }
+ // A trail whose time axis was burst-compressed (old firmware stamped arrival
+ // time; Chrome replayed queued packets ms apart) can't drive phases or lap
+ // times as-is — but its positions and device speeds are fine, so REBUILD the
+ // clock from distance ÷ speed instead of refusing. Old sessions stay useful.
+ let approx=false;
+ if(!hires && trailAxisBroken(src)){ src=repairTimeAxis(src); approx=true; }
  // hero map: the whole outing, at the best rate available
- setupReplay(src, hires?"hi-res":"phone trail");
- // A trail whose time axis was burst-compressed (screen off -> Chrome replayed
- // queued packets ms apart) produces nonsense lap/sector times. Detect it:
- // many steps that cover real distance in implausibly little time.
- if(!hires){
-  let moved=0, squashed=0;
-  for(let i=1;i<src.length;i++){
-   const dt=(src[i].t||0)-(src[i-1].t||0);
-   const d=distM(src[i-1].la,src[i-1].lo,src[i].la,src[i].lo);
-   if(d>5){ moved++; if(dt<0.05) squashed++; }
-  }
-  if(moved>10 && squashed/moved>0.05){
-   document.getElementById("anaout").style.display="none";
-   anaMsg("Lap/sector analysis is disabled for this session: its phone-trail "
-    +"timestamps were corrupted (screen was off, packets arrived in bursts), so "
-    +"computed times would be wrong. The runs table above (timed on the logger) "
-    +"is correct. For real analysis, connect the logger and FETCH FULL-RATE, or "
-    +"open the session's .BIN — sessions recorded on the new firmware don't "
-    +"have this problem.");
-   return;
-  }
+ setupReplay(src, (hires?"hi-res":"phone trail")+(approx?" · rebuilt clock":""));
+ if(approx){
+  const h2=document.getElementById("svHint");
+  if(h2) h2.innerHTML+=(h2.innerHTML?"<br>":"")
+   +"⚠ This session's timestamps were corrupted at recording (old firmware / "
+   +"screen-off packet bursts). Timing has been reconstructed from speed × "
+   +"distance: phases and zones are meaningful, lap/sector times are "
+   +"approximate (~±1–2%). The runs table (timed on the logger) stays exact.";
  }
  // be upfront when the 25/50 Hz stream never made it into this session
  const hint=document.getElementById("svHint");
@@ -1359,13 +1380,7 @@ function analysisLapsFor(s){
  else if(s.hasHires){ const h=loadHires(s.id); src=(h&&h.length>=20)?h:sessionTrail(s); }
  else src=sessionTrail(s);
  if(!src || src.length<20) return {err:"not enough recorded data"};
- let moved=0, squashed=0;
- for(let i=1;i<src.length;i++){
-  const dt=(src[i].t||0)-(src[i-1].t||0);
-  const d=distM(src[i-1].la,src[i-1].lo,src[i].la,src[i].lo);
-  if(d>5){ moved++; if(dt<0.05) squashed++; }
- }
- if(moved>10 && squashed/moved>0.05) return {err:"corrupted timestamps (recorded before the time-axis fix)"};
+ if(trailAxisBroken(src)) src=repairTimeAxis(src);   // salvage old recordings
  const t=db.tracks.find(x=>x.id===s.trackId);
  if(!t) return {err:"its track was deleted"};
  const stage=t.mode==="stage";
@@ -1714,7 +1729,11 @@ function smoothPhases(pts){
  const n=pts.length, ph=new Array(n).fill("coast");
  if(n<3) return ph;
  for(let i=0;i<n;i++){
-  let j0=i, j1=i;
+  // window: ±0.35 s but ALWAYS at least one sample each side — at coarse
+  // sample spacing (old 10 Hz trails decimated to ~1.5 Hz) a pure time gate
+  // finds no neighbours, the slope silently computes as 0, and every moving
+  // sample reads coast/corner (the "phases are broken" field report #2)
+  let j0=Math.max(0,i-1), j1=Math.min(n-1,i+1);
   while(j0>0 && pts[i].t-pts[j0-1].t<0.35) j0--;
   while(j1<n-1 && pts[j1+1].t-pts[i].t<0.35) j1++;
   // slope from the MEANS of the window's two halves, not its two endpoints —
