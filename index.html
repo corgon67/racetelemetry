@@ -369,6 +369,7 @@
   <div id="mapwrap">
    <div id="map"></div>
    <button id="walkBtn" class="mapfab" style="top:10px;left:10px" onclick="toggleWalk()">RECORD TRACK (WALK)</button>
+   <button class="mapfab" style="top:10px;right:10px" onclick="openTracksView()">TRACKS</button>
    <button id="outlineBtn" class="mapfab" style="bottom:10px;left:10px;display:none"
     onclick="toggleOutline()">OUTLINE</button>
    <button id="meBtn" class="mapfab" style="bottom:10px;right:10px" onclick="centerOnMe()">FOLLOW</button>
@@ -562,6 +563,15 @@
     keep clips to a run or a few laps each.</div>
   </div>
  </div>
+</div>
+<!-- tracks & venues browser: every track with its memory (PB, corners, focus)
+     and its leaderboard — opened from the TRACKS button on the map -->
+<div class="replaywrap" id="tracksView">
+ <div class="replaytop">
+  <button onclick="closeTracksView()">‹ BACK</button>
+  <span class="muted" style="flex:1;text-align:right;margin-left:10px">Tracks &amp; venues</span>
+ </div>
+ <div id="tracksBody" style="flex:1;overflow-y:auto;padding:12px"></div>
 </div>
 <div id="uibar">
  <span>CUSTOMIZING — use the tools on each widget</span>
@@ -967,6 +977,7 @@ window.addEventListener("popstate",()=>{
  else if(document.getElementById("sheet").classList.contains("up")) hideSheetNow();
  else if(document.getElementById("camView").classList.contains("up")) closeCamViewNow();
  else if(document.getElementById("videoView").classList.contains("up")) closeVideoViewNow();
+ else if(document.getElementById("tracksView").classList.contains("up")) closeTracksViewNow();
  else if(document.getElementById("anaView").classList.contains("up")) closeAnaNow();
 });
 
@@ -1532,6 +1543,7 @@ function updateVenueMemory(s){
     delta:+(now-v.focus.baseline).toFixed(2)};
   }
  }
+ v.lapLen=Math.round(best.rows[best.rows.length-1].d-best.rows[0].d);   // keys the leaderboard
  if(d.prevPb==null || best.time<d.prevPb-0.005){
   v.pb={time:+best.time.toFixed(2), sessId:s.id, date:s.startedAt};
   (v.pbHistory=v.pbHistory||[]).push({time:v.pb.time, date:s.startedAt});
@@ -1585,13 +1597,29 @@ function clearFocus(trackId){
 // ---------------- venue leaderboards (Netlify Blobs backend) ----------------
 // Venue key = physical start-line position (3 dp ≈ 100 m) + mode + lap-length
 // bucket, so every phone at the same track+layout lands on the same board.
-function venueKeyFor(s, best){
- const t=db.tracks.find(x=>x.id===s.trackId);
+function venueKeyRaw(t, lapLenM){
  if(!t) return null;
  const sg=(t.gates||[]).find(g=>g.role==="startfinish"||g.role==="start");
  if(!sg) return null;
- const len=best?Math.max(1,Math.round((best.rows[best.rows.length-1].d-best.rows[0].d)/100)):0;
+ const len=Math.max(1,Math.round((lapLenM||0)/100));
  return (sg.la.toFixed(3)+"x"+sg.lo.toFixed(3)+"x"+(t.mode||"loop")+"x"+len).toLowerCase();
+}
+function venueKeyFor(s, best){
+ const t=db.tracks.find(x=>x.id===s.trackId);
+ const lapLen=best?(best.rows[best.rows.length-1].d-best.rows[0].d):0;
+ return venueKeyRaw(t, lapLen);
+}
+function lbHtml(top,count){
+ return (top.length?top.map((e,i)=>
+   `<div style="display:flex;gap:8px;align-items:center;padding:2px 0">
+     <span style="width:1.8em;font-weight:700">${i+1}.</span>
+     <span style="flex:1;overflow:hidden;text-overflow:ellipsis">${e.driver}</span>
+     <span style="font-variant-numeric:tabular-nums;font-weight:700">${fmt(e.time)}</span>
+     ${e.sid?`<button class="minib" style="font-size:.75em" onclick="lbView('${e.sid}')">VIEW</button>`:""}
+    </div>`).join("")
+  :"No entries yet — set the first time.")
+ +`<div class="muted" style="margin-top:4px;font-size:.78em">${count} entr${count===1?"y":"ies"} ·
+    best per driver · club-trust, times unverified — VIEW opens the actual lap</div>`;
 }
 async function lbRefresh(){
  const el=document.getElementById("lbBody"); if(!el) return;
@@ -1604,16 +1632,7 @@ async function lbRefresh(){
   const r=await fetch("/api/lb/"+encodeURIComponent(key));
   if(!r.ok) throw new Error("server "+r.status);
   const {top,count}=await r.json();
-  el.innerHTML=(top.length?top.map((e,i)=>
-    `<div style="display:flex;gap:8px;align-items:center;padding:2px 0">
-      <span style="width:1.8em;font-weight:700">${i+1}.</span>
-      <span style="flex:1;overflow:hidden;text-overflow:ellipsis">${e.driver}</span>
-      <span style="font-variant-numeric:tabular-nums;font-weight:700">${fmt(e.time)}</span>
-      ${e.sid?`<button class="minib" style="font-size:.75em" onclick="lbView('${e.sid}')">VIEW</button>`:""}
-     </div>`).join("")
-   :"No entries yet — set the first time.")
-  +`<div class="muted" style="margin-top:4px;font-size:.78em">${count} entr${count===1?"y":"ies"} ·
-     best per driver · club-trust, times unverified — VIEW opens the actual lap</div>`;
+  el.innerHTML=lbHtml(top,count);
  }catch(e){
   el.textContent="Couldn't load ("+(e.message||e)+"). Online, and backend deployed?";
  }
@@ -1636,6 +1655,61 @@ async function lbSubmit(){
   if(!r.ok) throw new Error("server "+r.status);
   lbRefresh();
  }catch(e){ alert("Couldn't submit: "+(e.message||e)); }
+}
+// ---------------- tracks & venues browser ----------------
+function openTracksView(){
+ renderTracksView();
+ const el=document.getElementById("tracksView");
+ if(!el.classList.contains("up")){ el.classList.add("up"); navPush(); }
+}
+function closeTracksViewNow(){ document.getElementById("tracksView").classList.remove("up"); }
+function closeTracksView(){
+ const was=document.getElementById("tracksView").classList.contains("up");
+ closeTracksViewNow();
+ if(was) navConsume();
+}
+function renderTracksView(){
+ const el=document.getElementById("tracksBody"); if(!el) return;
+ el.innerHTML=db.tracks.map(t=>{
+  const v=(db.venues||{})[t.id]||{};
+  const nSess=db.sessions.filter(s=>s.trackId===t.id && !s.imported).length;
+  const trend=(v.pbHistory&&v.pbHistory.length>1)
+   ? v.pbHistory.slice(-4).map(p=>fmt(p.time)).join(" → ") : null;
+  return `<div class="card" style="margin-bottom:12px">
+   <div class="l">${t.name}${t.id===db.active?" · ACTIVE":""}</div>
+   <div style="margin-top:6px">
+    <span class="badge ${t.mode==="stage"?"stage":"loop"}">${t.mode==="stage"?"STAGE":"LOOP"}</span>
+    ${(t.outline&&t.outline.length>2)?'<span class="badge" style="background:#3B3835;color:#F4F1EA">WALKED</span>':""}
+    ${v.corners?`<span class="badge" style="background:#004225;color:#F4F1EA">${v.corners.length} CORNERS</span>`:""}
+   </div>
+   <div style="margin-top:6px;font-size:1.05em">
+    ${v.pb?`PB <b>${fmt(v.pb.time)}</b>`:'<span class="muted">no PB yet</span>'}
+    · ${nSess} session${nSess===1?"":"s"}
+   </div>
+   ${trend?`<div class="muted" style="font-size:.85em">PB trend: ${trend}</div>`:""}
+   ${v.focus?`<div style="font-size:.9em;margin-top:2px">🎯 focus: T${v.focus.corner} — ${v.focus.text}</div>`:""}
+   <div class="segrow" style="margin-top:8px">
+    ${t.id!==db.active?`<button class="minib" onclick="selectTrack(${t.id});renderTracksView()">SELECT</button>`:""}
+    <button class="minib" onclick="lbLoadInto('lbt_${t.id}',${t.id})">LEADERBOARD</button>
+   </div>
+   <div id="lbt_${t.id}" class="muted" style="font-size:.9em;margin-top:6px"></div>
+  </div>`;
+ }).join("") || '<div class="histempty">No tracks yet — make one on the MAP tab.</div>';
+}
+async function lbLoadInto(elId, trackId){
+ const el=document.getElementById(elId); if(!el) return;
+ const t=db.tracks.find(x=>x.id===trackId);
+ const v=(db.venues||{})[trackId];
+ if(!v || !v.lapLen){ el.textContent="Record a session here first — the board is keyed by lap length."; return; }
+ const key=venueKeyRaw(t, v.lapLen);
+ if(!key){ el.textContent="No start line set on this track."; return; }
+ el.textContent="Loading…";
+ try{
+  const r=await fetch("/api/lb/"+encodeURIComponent(key));
+  if(!r.ok) throw new Error("server "+r.status);
+  const {top,count}=await r.json();
+  el.innerHTML=lbHtml(top,count);
+ }catch(e){ el.textContent="Couldn't load ("+(e.message||e)+")."; }
 }
 function lbView(sid){
  fetch("/api/session/"+sid)
