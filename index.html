@@ -283,6 +283,8 @@
  <div class="dot" id="dot-ble"></div>
  <div class="dot" id="dot-fix"></div>
  <div class="dot" id="dot-rec"></div>
+ <button id="videoBtn" style="background:none;border:0;color:#F4F1EA;font-size:1.05em;
+  padding:2px 4px" onclick="openVideoMenu()">🎥</button>
  <button id="settingsBtn" style="font-size:.75em;font-weight:700;
   letter-spacing:.06em" onclick="openSettings()">MENU</button>
 </header>
@@ -302,10 +304,6 @@
        font-size:.82em;min-height:1.1em"></div>
   <div id="livebody">
    <div id="w_fs"><button class="b" style="margin-bottom:10px" onclick="enterFullDash()">FULL-SCREEN LIVE VIEW</button></div>
-   <div id="w_video" class="segrow">
-    <button class="b" style="margin-bottom:0" onclick="openCamView()">🎥 CAMERA</button>
-    <button class="b" style="margin-bottom:0" id="goproBtn" onclick="goproShutter()">GOPRO</button>
-   </div>
    <div id="w_speed">
     <div class="card">
      <div class="l" id="spdlabel">Speed km/h</div><div id="spd">0</div>
@@ -318,7 +316,16 @@
      <div class="v" id="fix" style="font-size:1.05em">--</div>
     </div>
    </div>
-   <div id="minimap"></div>
+   <div id="minimap">
+    <button class="mapfab" id="camFab" style="bottom:8px;left:8px;padding:6px 9px;z-index:600"
+     onclick="camInlineToggle()">📷</button>
+    <div id="camInlineBar" style="display:none;position:absolute;top:8px;right:8px;z-index:600;gap:6px">
+     <button class="mapfab" id="camRecMini" style="position:static;padding:6px 10px"
+      onclick="camRecToggle()">●</button>
+     <button class="mapfab" style="position:static;padding:6px 10px"
+      onclick="openCamView()">⛶</button>
+    </div>
+   </div>
    <div class="grid" id="w_laps">
     <div class="card"><div class="l">Current lap</div><div class="v" id="cur">--</div></div>
     <div class="card"><div class="l">Best lap</div><div class="v best" id="best">--</div></div>
@@ -343,8 +350,6 @@
       <div><div class="l">Throttle</div><div class="v" id="obdthr">--</div></div>
      </div>
     </div>
-    <button class="b" id="obdbtn" style="background:var(--card2);font-size:.9em;padding:10px"
-     onclick="connectObd()">CONNECT OBD DONGLE (BLE)</button>
    </div>
    <div class="card" id="w_status"><div class="l">Status</div>
     <div id="msg" class="muted">--</div></div>
@@ -369,17 +374,21 @@
  </div>
  <div class="tab" id="tab-history">
   <div id="historyList"></div>
-  <div class="card" style="margin:14px 0 10px">
-   <div style="display:flex;align-items:center">
-    <div class="l" style="flex:1">Raw logs — files on logger (over Bluetooth)</div>
-    <button style="background:var(--card2);color:var(--fg);border:0;border-radius:3px;
-     padding:6px 12px;font-weight:700" onclick="send('ls')">REFRESH</button>
+  <div class="muted" id="rawHdr" style="padding:10px 2px 6px;font-size:.8em;font-weight:700;
+   text-transform:uppercase;letter-spacing:.05em;cursor:pointer" onclick="toggleRaw()">▸ Raw logger files (.BIN)</div>
+  <div id="rawBody" style="display:none">
+   <div class="card" style="margin:4px 0 10px">
+    <div style="display:flex;align-items:center">
+     <div class="l" style="flex:1">Raw logs — files on logger (over Bluetooth)</div>
+     <button style="background:var(--card2);color:var(--fg);border:0;border-radius:3px;
+      padding:6px 12px;font-weight:700" onclick="send('ls')">REFRESH</button>
+    </div>
+    <div id="logfiles" class="muted" style="margin-top:6px">Connect to the logger, then tap
+     REFRESH. Download runs ~15-25 KB/s. The logger pauses/resumes automatically.</div>
    </div>
-   <div id="logfiles" class="muted" style="margin-top:6px">Connect to the logger, then tap
-    REFRESH. Download runs ~15-25 KB/s. The logger pauses/resumes automatically.</div>
+   <button class="b" style="font-size:1em"
+    onclick="document.getElementById('anafile').click()">OPEN A .BIN FILE FROM THIS PHONE</button>
   </div>
-  <button class="b" style="font-size:1em"
-   onclick="document.getElementById('anafile').click()">OPEN A .BIN FILE FROM THIS PHONE</button>
   <input type="file" id="anafile" accept=".bin,.BIN"
          style="display:none" onchange="analyzeFile(this)">
   <input type="file" id="impfile" accept=".json" style="display:none"
@@ -530,7 +539,7 @@
   <span class="muted" id="camTitle" style="flex:1;text-align:right;margin-left:10px">Camera + overlay</span>
  </div>
  <div style="flex:1;overflow-y:auto">
-  <div style="position:relative;background:#000">
+  <div id="camStage" style="position:relative;background:#000;min-height:52vh">
    <video id="camPreview" style="width:100%;display:block;max-height:56vh" playsinline muted></video>
    <canvas id="camCanvas" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none"></canvas>
   </div>
@@ -623,7 +632,7 @@ try{
 }catch(_){}
 // ---- user layout control: every live/full-dash widget can be hidden,
 // resized (S/M/L) and reordered from MENU → LIVE VIEW LAYOUT ----
-const LIVE_WIDGETS=[["w_fs","Full-screen button"],["w_video","Camera / GoPro"],["w_speed","Speed + G"],
+const LIVE_WIDGETS=[["w_fs","Full-screen button"],["w_speed","Speed + G"],
  ["minimap","Mini map"],["w_laps","Current / Best"],["w_delta","Delta"],
  ["splits","Splits row"],["w_session","Session button"],["w_obd","OBD"],
  ["w_status","Status"]];
@@ -803,6 +812,7 @@ let db=(()=>{
  d.tracks=d.tracks.map(migrateTrack);
  if(!d.sessions) d.sessions=[];
  if(d.activeSessionId===undefined) d.activeSessionId=null;
+ if(!d.venues) d.venues={};   // per-track memory: PB, corners, focus (the learning loop)
  return d;
 })();
 let storagePruned=false;
@@ -1054,6 +1064,11 @@ function endSession(){
  // never "crosses" it, so no laps are counted until you START TIMING again
  if(tr().mode==="loop") send("gate 0.000000,0.000000");
  saveDb(); renderSessionUI();
+ // fold the outing into venue memory and show the three-line debrief
+ try{
+  const d=updateVenueMemory(s);
+  if(d && !d.err) showDebrief(s);
+ }catch(_){}
 }
 function toggleSession(){ activeSession()?endSession():startSession(); }
 function decimateSamples(arr, maxPts){
@@ -1302,6 +1317,12 @@ function renderHistoryList(){
 }
 let sharedOpen=false;
 function toggleShared(){ sharedOpen=!sharedOpen; renderHistoryList(); }
+function toggleRaw(){
+ const b=document.getElementById("rawBody"), h=document.getElementById("rawHdr");
+ const open=b.style.display==="none";
+ b.style.display=open?"block":"none";
+ h.textContent=(open?"▾":"▸")+" Raw logger files (.BIN)";
+}
 // ---------------- the map-first session view ----------------
 // ONE tap on a History card opens this: hero satellite map with the driven
 // line at the best rate we have (50 Hz hi-res, else 10 Hz trail), scrubbable,
@@ -1360,6 +1381,8 @@ function openSessionView(sessId){
   return;
  }
  anaMsg(`Analysing ${hires?"50 Hz":"10 Hz"} data…`);
+ // older own-sessions recorded before venue memory existed: fold them in now
+ if(!s.imported && !s.debrief){ try{ updateVenueMemory(s); }catch(_){} }
  // let the overlay lay out first so the chart canvases have a real width
  setTimeout(()=>{
   try{ runAnalysis(pts, I, title); }
@@ -1441,6 +1464,113 @@ function analysisLapsFor(s){
  const real=laps.filter(l=>l.time<=thr);
  const best=(real.length?real:laps).reduce((a,b)=>a.time<b.time?a:b);
  return {laps, best, trackName:s.trackName};
+}
+// ================= the learning loop =================
+// Venue memory (db.venues[trackId]) makes sessions at the same track talk to
+// each other: PB history, corner layout learned from the PB lap, and ONE
+// carried-forward focus that the next session automatically checks.
+function venueFor(trackId){
+ db.venues=db.venues||{};
+ return db.venues[trackId]=db.venues[trackId]||{};
+}
+function lapTimeInFrac(l,f0,f1){
+ return lapElapsedAt(l,Math.max(0,Math.min(1,f1)))
+       -lapElapsedAt(l,Math.max(0,Math.min(1,f0)));
+}
+// Corners = contiguous stretches of the PB lap above 0.35 g lateral, held for
+// ≥0.6 s, numbered in driving order. Stored per venue so advice says "T3",
+// not "62% of lap distance" — and so next session's laps compare corner to
+// corner even when the laps themselves differ.
+function detectCorners(best){
+ const R=best.rows;
+ if(!R || R.length<10) return null;
+ const d0=R[0].d, dTot=R[R.length-1].d-d0||1;
+ const cs=[]; let cur=null;
+ for(let i=0;i<R.length;i++){
+  if(Math.abs(R[i].ay||0)>0.35){
+   if(!cur) cur={i0:i,i1:i,peak:0};
+   cur.i1=i; cur.peak=Math.max(cur.peak,Math.abs(R[i].ay||0));
+  }else if(cur){
+   if(R[cur.i1].t-R[cur.i0].t>=0.6) cs.push(cur);
+   cur=null;
+  }
+ }
+ if(cur && R[cur.i1].t-R[cur.i0].t>=0.6) cs.push(cur);
+ if(!cs.length) return null;
+ return cs.map((c,k)=>({n:k+1,
+  f0:+(((R[c.i0].d-d0)/dTot).toFixed(4)),
+  f1:+(((R[c.i1].d-d0)/dTot).toFixed(4)),
+  peak:+c.peak.toFixed(2)}));
+}
+// After a session ends (or an old own-session is first opened), fold it into
+// the venue memory and produce a debrief: PB context + focus verdict.
+function updateVenueMemory(s){
+ if(!s || !s.trackId || s.imported) return null;
+ const res=analysisLapsFor(s);
+ if(res.err) return {err:res.err};
+ const v=venueFor(s.trackId);
+ const best=res.best;
+ const d={sessId:s.id, at:Date.now(), best:+best.time.toFixed(2), laps:res.laps.length,
+          prevPb:v.pb?v.pb.time:null};
+ // focus check BEFORE PB update (verdict is against the focus baseline)
+ if(v.focus && v.corners){
+  const c=v.corners.find(x=>x.n===v.focus.corner);
+  if(c){
+   const now=lapTimeInFrac(best,c.f0,c.f1);
+   d.focus={corner:v.focus.corner, text:v.focus.text,
+    baseline:v.focus.baseline, now:+now.toFixed(2),
+    delta:+(now-v.focus.baseline).toFixed(2)};
+  }
+ }
+ if(d.prevPb==null || best.time<d.prevPb-0.005){
+  v.pb={time:+best.time.toFixed(2), sessId:s.id, date:s.startedAt};
+  (v.pbHistory=v.pbHistory||[]).push({time:v.pb.time, date:s.startedAt});
+  if(v.pbHistory.length>30) v.pbHistory.shift();
+  v.corners=detectCorners(best)||v.corners;   // re-learn layout from the PB lap
+  d.newPb=true;
+ }
+ s.debrief=d;
+ saveDb();
+ return d;
+}
+// the post-session ritual: three lines, then depth one tap below
+function showDebrief(s){
+ const d=s.debrief; if(!d) return;
+ const v=venueFor(s.trackId);
+ document.getElementById("sheettrack").textContent="Debrief — "+s.trackName;
+ let html=`<div style="font-size:1.2em;font-weight:800;margin-bottom:6px">
+   Best ${fmt(d.best)}${d.newPb?" — NEW PB 🏆":(d.prevPb!=null?` · PB ${fmt(d.prevPb)}`:"")}</div>`;
+ if(d.focus){
+  const f=d.focus;
+  html+=`<div style="margin-bottom:6px">🎯 Focus check — <b>T${f.corner}</b>: `
+   +(f.delta<=-0.05?`<b style="color:var(--ok)">${f.delta.toFixed(2)}s — improved ✓</b>`
+    :f.delta>=0.05?`<b style="color:var(--bad)">+${f.delta.toFixed(2)}s — keep working it</b>`
+    :"about even")
+   +` <span class="muted">(${f.baseline.toFixed(2)} → ${f.now.toFixed(2)}s)</span></div>`;
+ }
+ if(v.pbHistory && v.pbHistory.length>1)
+  html+=`<div class="muted" style="margin-bottom:6px">PB trend: `
+   +v.pbHistory.slice(-4).map(p=>fmt(p.time)).join(" → ")+`</div>`;
+ html+=`<div class="muted" style="margin-bottom:8px">${d.laps} lap${d.laps===1?"":"s"} ·
+   the map, zones and coach are in the full session</div>
+  <button class="b" style="background:var(--accent);color:var(--accent-ink)"
+   onclick="hideSheet();openSessionView('${s.id}')">OPEN FULL SESSION</button>`;
+ document.getElementById("sheetbtns").innerHTML=html;
+ sheetUp();
+}
+let coachCandidate=null, lastCoach=null;
+function applyFocusCandidate(){
+ if(!coachCandidate) return;
+ const v=venueFor(coachCandidate.trackId);
+ v.focus={corner:coachCandidate.corner, text:coachCandidate.text,
+          baseline:coachCandidate.baseline, createdAt:Date.now()};
+ saveDb();
+ if(lastCoach) renderCoach(lastCoach.laps,lastCoach.best);
+}
+function clearFocus(trackId){
+ delete venueFor(trackId).focus;
+ saveDb();
+ if(lastCoach) renderCoach(lastCoach.laps,lastCoach.best);
 }
 function sessLabel(s){
  return (s.driver?s.driver+" · ":"")+s.trackName+" · "
@@ -3077,6 +3207,7 @@ function hideSheetNow(){
  document.getElementById("sheet").classList.remove("up");
  if(tapMarker && map){ map.removeLayer(tapMarker); tapMarker=null; }
  editingGate=null;
+ clearGateHandles();
 }
 function hideSheet(){
  const was=document.getElementById("sheet").classList.contains("up");
@@ -3152,12 +3283,49 @@ function placeGate(role){
 // so you can zoom/pan wherever you like while fine-tuning.
 let editingGate=null, editMove=false;
 let gateNudgeStep=1; // metres per dpad tap
+// ---- transform handles: drag the CENTER to move the gate; drag either
+// ENDPOINT to rotate and resize in one motion (the line pivots and stretches
+// around its middle anchor). Buttons below remain for fine adjustment.
+let gateHandles=[];
+function clearGateHandles(){
+ if(map) gateHandles.forEach(h=>map.removeLayer(h));
+ gateHandles=[];
+}
+function showGateHandles(g){
+ clearGateHandles();
+ if(!map || !g) return;
+ const mk=(la,lo,color,onDrag)=>{
+  const m=L.marker([la,lo],{draggable:true, icon:L.divIcon({className:"gatepin",
+   html:`<div style="width:20px;height:20px;border-radius:50%;background:${color};
+    border:3px solid #fff;box-shadow:0 0 5px rgba(0,0,0,.8)"></div>`,
+   iconSize:[20,20], iconAnchor:[10,10]})}).addTo(map);
+  m.on("drag",e=>onDrag(e.latlng));
+  m.on("dragend",()=>{
+   saveDb(); syncGate(); renderEditSheet();
+   showGateHandles(gates().find(x=>x.id===editingGate));
+  });
+  gateHandles.push(m);
+ };
+ const [p1,p2]=gateEndpoints(g);
+ // centre = move
+ mk(g.la, g.lo, "#86A5D4", ll=>{ g.la=ll.lat; g.lo=ll.lng; redrawMarks(); });
+ // endpoints = rotate + stretch about the centre
+ const endDrag=ll=>{
+  const d=distM(g.la, g.lo, ll.lat, ll.lng);
+  g.width=Math.max(4, Math.min(80, 2*d));
+  g.heading=bearingDeg(g.la, g.lo, ll.lat, ll.lng)%360;
+  redrawMarks();
+ };
+ mk(p1[0], p1[1], "#F2A900", endDrag);
+ mk(p2[0], p2[1], "#F2A900", endDrag);
+}
 function openEditGate(id){
  editingGate=id;
  const g=gates().find(x=>x.id===id);
  if(!g) return;
  editMove=false;            // open on the compact rotate+width view
  renderEditSheet();
+ showGateHandles(g);
  sheetUp();
  centerAboveSheet(L.latLng(g.la,g.lo));
 }
@@ -3211,18 +3379,18 @@ function renderEditSheet(){
 function rotateGate(delta){
  const g=gates().find(x=>x.id===editingGate); if(!g) return;
  g.heading=((g.heading||90)+delta+360)%360;
- saveDb(); redrawMarks(); renderEditSheet();
+ saveDb(); redrawMarks(); renderEditSheet(); showGateHandles(g);
 }
 function widthGate(delta){
  const g=gates().find(x=>x.id===editingGate); if(!g) return;
  g.width=Math.max(5,Math.min(60,(g.width||GATE_DEFAULT_WIDTH)+delta));
- saveDb(); redrawMarks(); renderEditSheet();
+ saveDb(); redrawMarks(); renderEditSheet(); showGateHandles(g);
 }
 function nudgeGate(dxE,dyN){
  const g=gates().find(x=>x.id===editingGate); if(!g) return;
  const [nla,nlo]=metersToLL(g.la,g.lo,dxE,dyN);
  g.la=nla; g.lo=nlo;
- saveDb(); redrawMarks(); renderEditSheet();
+ saveDb(); redrawMarks(); renderEditSheet(); showGateHandles(g);
 }
 function adjNudgeStep(delta){
  gateNudgeStep=Math.max(0.25,Math.min(5,gateNudgeStep+delta));
@@ -3294,6 +3462,9 @@ function openSettings(){
   <button class="b" style="background:var(--card2)" onclick="hideSheet();startPhoneGps()">USE PHONE GPS (NO LOGGER)</button>
   <div class="muted" style="text-align:center;margin-bottom:8px">times laps with this phone's own GPS —
    ~1 fix/s and no g-force, a backup when the logger isn't along. Connecting to the logger switches back.</div>
+  <button class="b" style="background:var(--card2)" onclick="hideSheet();connectObd()">CONNECT OBD DONGLE (BLE)</button>
+  <div class="muted" style="text-align:center;margin-bottom:8px">RPM &amp; throttle from a BLE ELM327
+   dongle — shows as a card on Live and is recorded into runs</div>
   <div class="l muted" style="margin:10px 0 6px;text-transform:uppercase;letter-spacing:.04em">Layout</div>
   <div class="segrow">
    <button class="b" style="background:var(--card2)" onclick="enterUiEdit('liveUI')">CUSTOMIZE LIVE VIEW</button>
@@ -3453,8 +3624,7 @@ async function connectObd(){
   dev.addEventListener("gattserverdisconnected",()=>{
    obd.connected=false;
    clearInterval(obd.timer);
-   document.getElementById("obdcard").style.display="none";
-   document.getElementById("obdbtn").style.display="block";
+   const c=document.getElementById("obdcard"); if(c) c.style.display="none";
   });
   const server=await dev.gatt.connect();
   let svc=null;
@@ -3473,8 +3643,7 @@ async function connectObd(){
   notifyC.addEventListener("characteristicvaluechanged",e=>
    obdData(new TextDecoder().decode(e.target.value)));
   obd.connected=true;
-  document.getElementById("obdcard").style.display="block";
-  document.getElementById("obdbtn").style.display="none";
+  const oc=document.getElementById("obdcard"); if(oc) oc.style.display="block";
   for(const c of ["ATZ","ATE0","ATL0","ATS0","ATSP0"]){
    await obdCmd(c);
    await new Promise(r=>setTimeout(r,c==="ATZ"?1000:250));
@@ -3683,9 +3852,13 @@ function vvExport(){
 // session is active when recording starts, the exact data-time offset is
 // stored on the session too (s.videoOffset), so even the raw clip re-syncs
 // automatically in the VIDEO OVERLAY player.
+// The camera is a MODE of the minimap panel (📷 on the widget), not a separate
+// destination — ⛶ expands the same preview full-screen and back, and the
+// recording never notices (the canvas element survives the moves).
 let cam={stream:null,raf:null,rec:null,chunks:[],on:false,path:null,pathAge:0,t0:0};
-function openCamView(){
- hideSheet();
+let camInline=false;
+function camStartStream(then){
+ if(cam.stream){ then(); return; }
  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
   alert("This browser can't access the camera."); return;
  }
@@ -3697,21 +3870,67 @@ function openCamView(){
   const v=document.getElementById("camPreview");
   v.srcObject=stream;
   v.play().catch(()=>{});
-  const view=document.getElementById("camView");
-  if(!view.classList.contains("up")){ view.classList.add("up"); navPush(); }
-  requestWakeLock();
   if(!cam.raf) camDrawLoop();
+  then();
  }).catch(e=>{
   if(e && e.name==="NotAllowedError")
    alert("Camera permission is blocked for this site.\n\nChrome ⋮ menu → Site settings → Camera → Allow, then try again.");
   else alert("Camera: "+(e&&e.message||e));
  });
 }
-function closeCamViewNow(){
- document.getElementById("camView").classList.remove("up");
- if(cam.on){ try{ cam.rec.stop(); }catch(_){} }
+function camStopStreamIfIdle(){
+ if(cam.on || camInline) return;
+ if(document.getElementById("camView").classList.contains("up")) return;
  if(cam.raf){ cancelAnimationFrame(cam.raf); cam.raf=null; }
  if(cam.stream){ cam.stream.getTracks().forEach(t=>t.stop()); cam.stream=null; }
+}
+function camAttach(target, fill){
+ const v=document.getElementById("camPreview"), c=document.getElementById("camCanvas");
+ target.appendChild(v); target.appendChild(c);
+ const vs=fill?{position:"absolute",inset:"0",width:"100%",height:"100%",
+   objectFit:"cover",maxHeight:"none",zIndex:500,display:"block"}
+  :{position:"relative",inset:"auto",width:"100%",height:"auto",
+   objectFit:"contain",maxHeight:"56vh",zIndex:"auto",display:"block"};
+ Object.assign(v.style,vs);
+ Object.assign(c.style,{position:"absolute",inset:"0",width:"100%",height:"100%",
+  objectFit:fill?"cover":"fill",zIndex:fill?501:"auto",pointerEvents:"none",display:"block"});
+}
+function camInlineToggle(){
+ const mm=document.getElementById("minimap");
+ if(!camInline){
+  camStartStream(()=>{
+   camInline=true;
+   camAttach(mm, true);
+   document.getElementById("camInlineBar").style.display="flex";
+   document.getElementById("camFab").textContent="🗺";
+  });
+ }else{
+  camInline=false;
+  document.getElementById("camInlineBar").style.display="none";
+  document.getElementById("camFab").textContent="📷";
+  const v=document.getElementById("camPreview"), c=document.getElementById("camCanvas");
+  v.style.display="none"; c.style.display="none";   // recording (if any) carries on unseen
+  camStopStreamIfIdle();
+ }
+}
+function openCamView(){
+ hideSheet();
+ camStartStream(()=>{
+  camAttach(document.getElementById("camStage"), true);
+  const view=document.getElementById("camView");
+  if(!view.classList.contains("up")){ view.classList.add("up"); navPush(); }
+  requestWakeLock();
+ });
+}
+function closeCamViewNow(){
+ document.getElementById("camView").classList.remove("up");
+ if(camInline && cam.stream){
+  camAttach(document.getElementById("minimap"), true);   // back into the widget
+ }else{
+  const v=document.getElementById("camPreview"), c=document.getElementById("camCanvas");
+  if(v){ v.style.display="none"; } if(c){ c.style.display="none"; }
+  camStopStreamIfIdle();   // keeps running if a clip is still recording
+ }
 }
 function closeCamView(){
  const was=document.getElementById("camView").classList.contains("up");
@@ -3750,7 +3969,10 @@ function camDrawLoop(){
   la:(st.f>=3?st.la:null), lo:st.lo, rel, path:cam.path});
  if(cam.on){
   const el=(performance.now()-cam.t0)/1000;
-  document.getElementById("camRecBtn").textContent="■ STOP — REC "+fmt(el);
+  const b1=document.getElementById("camRecBtn");
+  if(b1) b1.textContent="■ STOP — REC "+fmt(el);
+  const b2=document.getElementById("camRecMini");
+  if(b2){ b2.textContent="■ "+fmt(el); b2.style.background="#CC0000"; b2.style.color="#fff"; }
  }
 }
 function camRecToggle(){
@@ -3769,8 +3991,11 @@ function camRecToggle(){
  cam.rec.ondataavailable=e=>{ if(e.data.size) cam.chunks.push(e.data); };
  cam.rec.onstop=()=>{
   cam.on=false;
-  document.getElementById("camRecBtn").textContent="● START RECORDING";
-  document.getElementById("camRecBtn").style.background="var(--bad)";
+  const b1=document.getElementById("camRecBtn");
+  if(b1){ b1.textContent="● START RECORDING"; b1.style.background="var(--bad)"; }
+  const b2=document.getElementById("camRecMini");
+  if(b2){ b2.textContent="●"; b2.style.background=""; b2.style.color=""; }
+  camStopStreamIfIdle();
   const blob=new Blob(cam.chunks,{type:"video/webm"});
   cam.chunks=[];
   const a=document.createElement("a");
@@ -3792,6 +4017,20 @@ function camRecToggle(){
  cam.rec.start(1000);
 }
 
+// header 🎥 — one small icon, everything camera lives behind it
+function openVideoMenu(){
+ document.getElementById("sheettrack").textContent="Video & cameras";
+ document.getElementById("sheetbtns").innerHTML=`
+  <button class="b" style="background:var(--card2)"
+   onclick="hideSheet();camInlineToggle()">${camInline?"HIDE":"SHOW"} PHONE CAMERA (in the map panel)</button>
+  <button class="b" style="background:var(--card2)" id="goproBtn" onclick="goproShutter()">GOPRO</button>
+  <div class="muted" style="text-align:center;margin-bottom:6px">phone camera records with the live
+   HUD burned in (📷 on the map panel, ⛶ for full screen). GoPro: HERO9+, pair once via
+   Preferences → Wireless Connections → Connect Device. Starting either during a session stamps
+   the video-sync offset automatically. Overlaying saved footage lives in a session → VIDEO OVERLAY.</div>`;
+ sheetUp();
+ updateGoproBtn();
+}
 // ---------------- GoPro remote (Open GoPro BLE) ----------------
 // Web Bluetooth can drive a GoPro's shutter (HERO9 and newer: pair once via
 // the camera's "Pair Device" menu). No preview over BLE — this is a remote
@@ -3853,14 +4092,15 @@ function toggleFold(card){
 }
 function applyFolds(){
  if(!settings.cardFolds) return;
- document.querySelectorAll("#anaView .card").forEach(c=>{
-  c.classList.toggle("folded", !!settings.cardFolds[foldKey(c)]);
+ document.querySelectorAll(".card").forEach(c=>{
+  const l=c.firstElementChild;
+  if(l && l.classList && l.classList.contains("l"))
+   c.classList.toggle("folded", !!settings.cardFolds[foldKey(c)]);
  });
 }
 (function(){
  let lpTimer=null, sx=0, sy=0;
- const root=document.getElementById("anaView");
- if(!root) return;
+ const root=document;   // fold works EVERYWHERE a card has a header strip
  root.addEventListener("pointerdown",e=>{
   const h=e.target.closest(".l");
   if(!h || !h.parentElement.classList.contains("card") || h.parentElement.firstElementChild!==h) return;
@@ -4293,12 +4533,53 @@ function computeCoach(laps,best){
 }
 function renderCoach(laps,best){
  const el=document.getElementById("anacoach"); if(!el) return;
+ lastCoach={laps,best};
  let rows=[];
  try{ rows=computeCoach(laps,best); }catch(_){}
- el.innerHTML=rows.length
-  ? rows.map(r=>`<div style="padding:3px 0;${r.t!=null?"cursor:pointer":""}"
-     ${r.t!=null?`onclick="coachJump(${r.t.toFixed(2)})"`:""}>${r.t!=null?"📍 ":""}${r.txt}</div>`).join("")
-  : '<span class="muted">Not enough data for coaching on this session.</span>';
+ // venue context: PB, named corners, the carried focus
+ const s=anaSessionId?db.sessions.find(x=>x.id===anaSessionId):null;
+ const v=(s && !s.imported && s.trackId)?(db.venues||{})[s.trackId]:null;
+ const corners=(v&&v.corners)||null;
+ const R=best.rows, d0=R[0].d, dTot=R[R.length-1].d-d0||1;
+ const fracOfT=t=>{
+  let lo=0, hi=R.length-1;
+  while(lo<hi){ const m=(lo+hi)>>1; if(R[m].t<t) lo=m+1; else hi=m; }
+  return (R[lo].d-d0)/dTot;
+ };
+ const cornerOf=t=>{
+  if(!corners) return null;
+  const f=fracOfT(t);
+  return corners.find(c=>f>=c.f0-0.02 && f<=c.f1+0.02)||null;
+ };
+ let head="";
+ if(v && v.pb)
+  head+=`<div style="font-weight:700">Venue PB ${fmt(v.pb.time)}${best.time<=v.pb.time+0.001?" — set this session":""}`
+   +(corners?` · ${corners.length} corners mapped`:"")+`</div>`;
+ if(v && v.focus)
+  head+=`<div style="margin-top:3px">🎯 Focus: <b>T${v.focus.corner}</b> — ${v.focus.text}
+    <button class="minib" style="font-size:.75em" onclick="clearFocus(${s.trackId})">CLEAR</button></div>`;
+ let body=rows.map(r=>{
+  const c=r.t!=null?cornerOf(r.t):null;
+  return `<div style="padding:3px 0;${r.t!=null?"cursor:pointer":""}"
+   ${r.t!=null?`onclick="coachJump(${r.t.toFixed(2)})"`:""}>${r.t!=null?"📍 ":""}${c?`<b>T${c.n}</b> — `:""}${r.txt}</div>`;
+ }).join("");
+ // offer a focus when none is set: the first located insight inside a known corner
+ coachCandidate=null;
+ if(v && corners && !v.focus && s){
+  const cand=rows.find(r=>r.t!=null && cornerOf(r.t));
+  if(cand){
+   const c=cornerOf(cand.t);
+   coachCandidate={trackId:s.trackId, corner:c.n,
+    text:String(cand.txt).slice(0,90),
+    baseline:+lapTimeInFrac(best,c.f0,c.f1).toFixed(2)};
+   body+=`<div style="padding:6px 0 2px">
+    <button class="minib" style="background:var(--best);color:#1A1A1A"
+     onclick="applyFocusCandidate()">🎯 SET T${c.n} AS THE FOCUS</button>
+    <span class="muted" style="font-size:.85em"> your next session here opens with a focus check</span></div>`;
+  }
+ }
+ el.innerHTML=(head?head+`<div style="border-top:1px solid var(--border2);margin:6px 0"></div>`:"")
+  +(body||'<span class="muted">Not enough data for coaching on this session.</span>');
 }
 function coachJump(tAbs){
  if(svScope) svShowFullRun();   // the insight times live on the full-run axis

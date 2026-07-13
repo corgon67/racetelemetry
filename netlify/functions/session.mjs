@@ -1,3 +1,4 @@
+// RaceLogger — © 2026 Josh "Yoshi" Retief. All rights reserved. See LICENSE.
 // RaceLogger share backend — one function, blob in / blob out.
 // POST /api/session        body = session bundle JSON  -> { id }
 // GET  /api/session/:id                                -> the bundle JSON
