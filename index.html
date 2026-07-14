@@ -463,38 +463,30 @@
     </div>
     <div class="card" style="margin-bottom:10px"><div class="l">Acceleration (best in this run)</div>
      <div id="anaaccel" style="font-size:.95em;margin-top:4px"></div></div>
-    <div class="card" style="margin-bottom:10px"><div class="l">Compare two laps</div>
-     <div style="display:flex;gap:6px;margin:8px 0">
-      <select id="cmpA" onchange="renderCompare()" style="flex:1;background:var(--input);
-       color:var(--fg);border:1px solid var(--border);border-radius:3px;padding:8px"></select>
-      <select id="cmpB" onchange="renderCompare()" style="flex:1;background:var(--input);
-       color:var(--fg);border:1px solid var(--border);border-radius:3px;padding:8px"></select>
+    <div class="card" style="margin-bottom:10px"><div class="l">Compare laps — yours or a friend's</div>
+     <div style="display:flex;gap:6px;margin:8px 0;flex-wrap:wrap">
+      <select id="cmpA" onchange="renderCompare()" style="flex:1;min-width:7.5em;background:var(--input);
+       color:var(--fg);border:2px solid var(--ink);border-radius:2px;padding:8px"></select>
+      <select id="cmpSrc" onchange="cmpSrcChange()" style="flex:1.3;min-width:9em;background:var(--input);
+       color:var(--fg);border:2px solid var(--ink);border-radius:2px;padding:8px"></select>
+      <select id="cmpB" onchange="renderCompare()" style="flex:1;min-width:7.5em;background:var(--input);
+       color:var(--fg);border:2px solid var(--ink);border-radius:2px;padding:8px"></select>
      </div>
      <canvas id="cmpmap" style="width:100%;border-radius:3px"></canvas>
+     <canvas id="cmpspd" style="width:100%;border-radius:3px;margin-top:6px"></canvas>
      <canvas id="cmpdelta" style="width:100%;border-radius:3px;margin-top:6px"></canvas>
-     <div class="muted" id="cmptxt" style="margin-top:6px"></div></div>
-    <div class="card" style="margin-bottom:10px"><div class="l">Speed vs distance</div>
-     <canvas id="anaspd" style="width:100%;border-radius:3px"></canvas></div>
-    <div class="card" style="margin-bottom:10px"><div class="l">Delta to best lap vs distance</div>
-     <canvas id="anadel" style="width:100%;border-radius:3px"></canvas></div>
+     <input type="range" id="cmpScrub" min="0" max="1000" value="500" style="width:100%;margin-top:4px"
+      oninput="cmpScrubMove(this.value)">
+     <div id="cmptxt" style="margin-top:4px;font-size:.95em"></div>
+     <div class="muted" style="font-size:.78em;margin-top:4px">drag the scrubber along the lap —
+      the cursor tracks all three views. Shaded bands are your mapped corners.
+      To race a friend: they SHARE LINK, you open it once, then pick them in the middle dropdown.</div>
+    </div>
     <div class="card" style="margin-bottom:10px"><div class="l">G-G diagram (laps only)</div>
-     <canvas id="anagg" style="width:100%;border-radius:3px"></canvas></div>
-   </div>
-   <div class="card" style="margin-bottom:10px" id="xcCard">
-    <div class="l">Head-to-head — any other session</div>
-    <div class="muted" style="margin:6px 0 2px">best lap vs best lap: a friend's imported
-     session, or your own earlier outing. Import once via SHARE; after that it's all in-app.</div>
-    <div style="display:flex;gap:6px;margin:8px 0">
-     <select id="xcSel" style="flex:1;background:var(--input);color:var(--fg);
-      border:2px solid var(--ink);border-radius:2px;padding:8px"></select>
-     <button class="minib" style="background:var(--accent);color:var(--accent-ink)"
-      onclick="runXCompare()">GO</button>
-    </div>
-    <div id="xcOut" style="display:none">
-     <canvas id="xcmap" style="width:100%;border-radius:3px"></canvas>
-     <canvas id="xcdelta" style="width:100%;border-radius:3px;margin-top:6px"></canvas>
-     <div class="muted" id="xctxt" style="margin-top:6px"></div>
-    </div>
+     <canvas id="anagg" style="width:100%;border-radius:3px"></canvas>
+     <div class="muted" style="font-size:.78em;margin-top:4px">every dot is a moment of the session:
+      left/right = cornering force, up = accelerating, down = braking. Fast drivers fill the
+      outer ring — gaps show grip you're not using.</div></div>
    </div>
    <div class="card" style="margin-bottom:10px"><div class="l">Result</div>
     <div id="anamsg" class="muted">No data analysed yet.</div></div>
@@ -1287,6 +1279,28 @@ function sessionHiRes(s){
  return s.hires||[];
 }
 // ---------------- HISTORY tab: card feed; a tap opens the session view ----------------
+// Data vintage at a glance — sets expectations BEFORE reading any numbers:
+//   25 Hz  = full-rate stream captured (green — trust everything)
+//   10 Hz  = phone trail only (neutral — lap times exact, detail coarse)
+//   ≈CLOCK = old-firmware burst-corrupted timestamps, clock rebuilt from
+//            speed×distance (amber — recomputed times are ±1–2%)
+function sessionVintage(s){
+ if(s.id===db.activeSessionId) return hiResBuf.length>20?"hires":"10hz";  // live: don't cache
+ if(s._vint) return s._vint;
+ let v;
+ if(s.hasHires || (s.hires&&s.hires.length)) v="hires";
+ else{
+  const tr0=s.track||[];
+  v=(tr0.length>10 && trailAxisBroken(tr0))?"approx":"10hz";
+ }
+ return s._vint=v;
+}
+function vintageBadge(s){
+ const v=sessionVintage(s);
+ return v==="hires"?'<span class="badge" style="background:#004225;color:#F4F1EA" title="full-rate stream captured">25 Hz</span>'
+  :v==="approx"?'<span class="badge" style="background:#F2A900;color:#1A1A1A" title="old firmware — clock rebuilt, recomputed times ±1–2%">≈ CLOCK</span>'
+  :'<span class="badge" style="background:#3B3835;color:#F4F1EA" title="10 Hz phone trail — line-timed laps exact, detail coarse">10 Hz</span>';
+}
 function renderHistory(){ renderHistoryList(); }
 function renderHistoryList(){
  const list=document.getElementById("historyList");
@@ -1314,6 +1328,7 @@ function renderHistoryList(){
     <div class="meta">
      <div class="venue">${s.trackName}
       <span class="badge ${stage?'stage':'loop'}">${stage?'STAGE':'LOOP'}</span>
+      ${vintageBadge(s)}
       ${s.imported?'<span class="badge" style="background:#2a4a6a;color:#cde">SHARED</span>':''}
       ${live?'<span class="badge live">LIVE</span>':''}</div>
      <div class="sub">${d.toLocaleDateString([],{weekday:'short',month:'short',day:'numeric'})}
@@ -1433,7 +1448,7 @@ function renderSvRuns(s){
  }
  el.innerHTML=`
   <div class="muted" style="padding:8px 2px 4px;font-size:.78em;text-transform:uppercase;letter-spacing:.04em">
-   ${Word}s — timed AT THE LINE ${live?'<span class="badge live">LIVE</span>':''} · tap MAP to see one</div>
+   ${Word}s — timed AT THE LINE ${vintageBadge(s)} ${live?'<span class="badge live">LIVE</span>':''} · tap MAP to see one</div>
   <table style="margin-bottom:10px"><thead>
    <tr><th>${Word}</th><th>Time</th><th>Delta</th><th></th></tr></thead>
    <tbody>${rows}</tbody></table>`;
@@ -1460,7 +1475,8 @@ function analysisLapsFor(s){
  project(pts);
  let laps=[];
  if(stage){
-  const crS=gateCrossTimes(pts,sg), crF=gateCrossTimes(pts,fg);
+  const armV=Math.max(1,settings.armSpeedMs||3);
+  const crS=gateCrossTimes(pts,sg,armV), crF=gateCrossTimes(pts,fg,armV);
   let lastFinish=-1;
   for(const cs of crS){
    if(cs<=lastFinish) continue;
@@ -1468,7 +1484,7 @@ function analysisLapsFor(s){
    if(cf!==undefined){ laps.push({a:cs,b:cf,time:cf-cs,rows:pts.filter(g=>g.t>=cs&&g.t<=cf)}); lastFinish=cf; }
   }
  }else{
-  const cr=gateCrossTimes(pts,sg);
+  const cr=gateCrossTimes(pts,sg,Math.max(1,settings.armSpeedMs||3));
   const minLap=settings.minLapS||10;
   let li=0;
   while(li<cr.length-1){
@@ -1752,87 +1768,6 @@ function sessLabel(s){
  return (s.driver?s.driver+" · ":"")+s.trackName+" · "
   +new Date(s.startedAt).toLocaleDateString([],{month:"short",day:"numeric"});
 }
-function buildXcSelect(cur){
- const sel=document.getElementById("xcSel"); if(!sel) return;
- const others=[...db.sessions].filter(s=>s.id!==cur.id).sort((a,b)=>b.startedAt-a.startedAt);
- sel.innerHTML=others.length
-  ? others.map(s=>{
-     const best=s.attempts.length?Math.min(...s.attempts.map(a=>a.time)):null;
-     return `<option value="${s.id}">${sessLabel(s)}${best!=null?" · "+fmt(best):""}</option>`;
-    }).join("")
-  : `<option value="">no other sessions yet</option>`;
- document.getElementById("xcOut").style.display="none";
-}
-function runXCompare(){
- const me=db.sessions.find(x=>x.id===anaSessionId);
- const other=db.sessions.find(x=>x.id===document.getElementById("xcSel").value);
- if(!me||!other){ alert("Pick a session to compare against."); return; }
- const A=analysisLapsFor(me), B=analysisLapsFor(other);
- const txt=document.getElementById("xctxt");
- document.getElementById("xcOut").style.display="block";
- if(A.err||B.err){
-  document.getElementById("xcmap").style.display="none";
-  document.getElementById("xcdelta").style.display="none";
-  txt.textContent=(A.err?`This session: ${A.err}. `:"")+(B.err?`Other session: ${B.err}.`:"");
-  return;
- }
- document.getElementById("xcmap").style.display="";
- document.getElementById("xcdelta").style.display="";
- const nameA=me.driver||settings.driverName||"this session";
- const nameB=other.driver||sessLabel(other);
- const la=A.best, lb=B.best;
- // sanity: distance-normalised deltas only mean something on the same course
- const lenA=la.rows[la.rows.length-1].d-la.rows[0].d;
- const lenB=lb.rows[lb.rows.length-1].d-lb.rows[0].d;
- const lenWarn=Math.abs(lenA-lenB)>Math.max(lenA,lenB)*0.12
-  ?" ⚠ lap lengths differ — same course/layout for both?":"";
- const N=220;
- const dl=Array.from({length:N},(_,i)=>lapElapsedAt(lb,i/(N-1))-lapElapsedAt(la,i/(N-1)));
- {
-  const cW=document.getElementById("xcmap").clientWidth||300;
-  const [x,w,h]=cv2d("xcmap",Math.round(cW*0.62));
-  const rows=la.rows;
-  const xs=rows.map(p=>p.x), ys=rows.map(p=>p.y);
-  const x0=Math.min(...xs),x1=Math.max(...xs),y0=Math.min(...ys),y1=Math.max(...ys);
-  const sc=Math.min((w-20)/(x1-x0||1),(h-20)/(y1-y0||1));
-  const d0=rows[0].d, dTot=rows[rows.length-1].d-d0||1;
-  x.lineWidth=5; x.lineCap="round";
-  for(let i=1;i<rows.length;i++){
-   const frac=(rows[i].d-d0)/dTot;
-   const j=Math.min(N-2,Math.floor(frac*(N-1)));
-   const slope=dl[j+1]-dl[j];
-   x.strokeStyle=Math.abs(slope)<0.004?"#999":(slope<0?"#2c2":"#e33");
-   x.beginPath();
-   x.moveTo(10+(rows[i-1].x-x0)*sc, h-10-(rows[i-1].y-y0)*sc);
-   x.lineTo(10+(rows[i].x-x0)*sc, h-10-(rows[i].y-y0)*sc);
-   x.stroke();
-  }
-  x.fillStyle="#888"; x.font="11px sans-serif";
-  x.fillText(`green = ${nameB} faster · red = ${nameA} faster`,10,14);
- }
- {
-  const [x,w,h]=cv2d("xcdelta",130);
-  const dmax=Math.max(0.3,...dl.map(Math.abs));
-  x.strokeStyle="#888"; x.beginPath(); x.moveTo(0,h/2); x.lineTo(w,h/2); x.stroke();
-  x.strokeStyle="#CC0000"; x.lineWidth=2.5; x.beginPath();
-  dl.forEach((v,i)=>{
-   const X=i/(N-1)*(w-10)+5, Y=h/2+v/dmax*(h/2-10);
-   i?x.lineTo(X,Y):x.moveTo(X,Y);
-  });
-  x.stroke();
-  x.fillStyle="#888"; x.font="11px sans-serif";
-  x.fillText(`${nameB} minus ${nameA} · ±${dmax.toFixed(1)}s`,8,12);
- }
- let swingI=0, swing=0;
- for(let i=1;i<N;i++){
-  const sgn=dl[i]-dl[i-1];
-  if(Math.abs(sgn)>Math.abs(swing)){ swing=sgn; swingI=i; }
- }
- txt.textContent=
-  `${nameA} ${fmt(la.time)} vs ${nameB} ${fmt(lb.time)} — gap ${dl[N-1]>=0?"+":""}${dl[N-1].toFixed(2)}s. `
-  +`Biggest swing around ${Math.round(swingI/(N-1)*100)}% distance `
-  +`(${swing<0?nameB:nameA} much stronger there).`+lenWarn;
-}
 function renderSvActions(s){
  const el=document.getElementById("svActions"); if(!el) return;
  el.innerHTML=`
@@ -1974,13 +1909,11 @@ let anaSessionId=null;   // session shown in the view (null = raw .BIN file)
 function openAna(title){
  const t=document.getElementById("anaTitle"); if(t) t.textContent=title||"Analysis";
  const s=anaSessionId?db.sessions.find(x=>x.id===anaSessionId):null;
- const xc=document.getElementById("xcCard");
- if(s){ renderSvRuns(s); renderSvActions(s); buildXcSelect(s); if(xc) xc.style.display=""; }
+ if(s){ renderSvRuns(s); renderSvActions(s); }
  else{
   document.getElementById("svRuns").innerHTML="";
   document.getElementById("svActions").innerHTML="";
   document.getElementById("svHint").innerHTML="";
-  if(xc) xc.style.display="none";   // raw .BIN — no session to compare against
  }
  const v=document.getElementById("anaView");
  if(!v.classList.contains("up")){ v.classList.add("up"); navPush(); }
@@ -4545,7 +4478,12 @@ function crossings(pts,gxy,width){
 // the same geometry the live timer uses (gateEndpoints), so offline analysis
 // agrees with the runs that already counted live. Works at low speed too, so a
 // slow street lap still registers. pts must be projected (have .x/.y).
-function gateCrossTimes(pts, g){
+function gateCrossTimes(pts, g, minV){
+ // minV: for START/FINISH lap detection pass the arm speed — trundling across
+ // the line paddock-to-grid must NOT start a lap (field report: two paddock
+ // transits became "laps", shifting every number vs the live-timed table).
+ // Splits keep the permissive default so slow mid-lap moments still register.
+ minV=minV==null?0.5:minV;
  const [p1,p2]=gateEndpoints(g);
  const A=toXY(p1[0],p1[1],pts), B=toXY(p2[0],p2[1],pts);   // gate endpoints in pts frame
  const sx=B[0]-A[0], sy=B[1]-A[1];
@@ -4556,7 +4494,7 @@ function gateCrossTimes(pts, g){
   if(Math.abs(den)<1e-12) continue;
   const qx=A[0]-a.x, qy=A[1]-a.y;
   const u=(qx*sy-qy*sx)/den, v=(qx*ry-qy*rx)/den;
-  if(u>=0&&u<1&&v>=0&&v<=1 && ((a.spd||0)>0.5||(b.spd||0)>0.5))   // crossed, and moving
+  if(u>=0&&u<1&&v>=0&&v<=1 && ((a.spd||0)>minV||(b.spd||0)>minV))   // crossed, at speed
    out.push(a.t+u*(b.t-a.t));
  }
  return out;
@@ -4616,10 +4554,11 @@ function runAnalysis(pts, I, fname){
  if(!sg){ anaMsg(`Track "${t.name}" has no start${stage?"":"/finish"} line — set one on the Map tab first.`); return; }
  if(stage && !fg){ anaMsg(`Track "${t.name}" is in stage mode but has no finish line set.`); return; }
  let laps=[];
+ const armV=Math.max(1,settings.armSpeedMs||3);   // paddock trundles don't start laps
  if(stage){
-  const crS=gateCrossTimes(pts,sg);
-  const crF=gateCrossTimes(pts,fg);
-  if(!crS.length||!crF.length){ anaMsg(`The driven line never crosses both the start and finish of "${t.name}". Right track selected, and are the lines placed across the path?`); return; }
+  const crS=gateCrossTimes(pts,sg,armV);
+  const crF=gateCrossTimes(pts,fg,armV);
+  if(!crS.length||!crF.length){ anaMsg(`The driven line never crosses both the start and finish of "${t.name}" at speed. Right track selected, and are the lines placed across the path?`); return; }
   let lastFinish=-1;   // a start crossed twice before one finish = one run,
   for(const cs of crS){ // not two overlapping ones
    if(cs<=lastFinish) continue;
@@ -4630,8 +4569,8 @@ function runAnalysis(pts, I, fname){
    }
   }
  } else {
-  const cr=gateCrossTimes(pts,sg);
-  if(cr.length<2){ anaMsg(`The driven line only crosses the start/finish of "${t.name}" ${cr.length} time(s) — need at least two for a lap. Right track selected?`); return; }
+  const cr=gateCrossTimes(pts,sg,armV);
+  if(cr.length<2){ anaMsg(`The driven line only crosses the start/finish of "${t.name}" ${cr.length} time(s) at speed — need at least two for a lap. Right track selected?`); return; }
   const minLap=settings.minLapS||10, cool=settings.lapCooldown||0;
   let li=0;
   while(li<cr.length-1){
@@ -4787,16 +4726,23 @@ function computeCoach(laps,best){
  }
  return rows;
 }
+let coachLapN=null;   // which lap the coach dissects (default: best)
+function coachPick(v){
+ coachLapN=+v||null;
+ if(lastCoach) renderCoach(lastCoach.laps,lastCoach.best);
+}
 function renderCoach(laps,best){
  const el=document.getElementById("anacoach"); if(!el) return;
  lastCoach={laps,best};
+ // coach the SELECTED lap, not just the best — every lap has lessons
+ const subject=laps.find(l=>l.n===coachLapN)||best;
  let rows=[];
- try{ rows=computeCoach(laps,best); }catch(_){}
+ try{ rows=computeCoach(laps,subject); }catch(_){}
  // venue context: PB, named corners, the carried focus
  const s=anaSessionId?db.sessions.find(x=>x.id===anaSessionId):null;
  const v=(s && !s.imported && s.trackId)?(db.venues||{})[s.trackId]:null;
  const corners=(v&&v.corners)||null;
- const R=best.rows, d0=R[0].d, dTot=R[R.length-1].d-d0||1;
+ const R=subject.rows, d0=R[0].d, dTot=R[R.length-1].d-d0||1;
  const fracOfT=t=>{
   let lo=0, hi=R.length-1;
   while(lo<hi){ const m=(lo+hi)>>1; if(R[m].t<t) lo=m+1; else hi=m; }
@@ -4807,7 +4753,11 @@ function renderCoach(laps,best){
   const f=fracOfT(t);
   return corners.find(c=>f>=c.f0-0.02 && f<=c.f1+0.02)||null;
  };
- let head="";
+ let head=`<div style="margin-bottom:5px">Analysing
+  <select onchange="coachPick(this.value)" style="background:var(--input);color:var(--fg);
+   border:2px solid var(--ink);border-radius:2px;padding:4px 6px;font-size:.95em">
+   ${laps.map(l=>`<option value="${l.n}" ${l===subject?"selected":""}>L${l.n} — ${fmtT(l.time)}${l===best?" · best":(l.out?" · out":"")}</option>`).join("")}
+  </select></div>`;
  if(v && v.pb)
   head+=`<div style="font-weight:700">Venue PB ${fmt(v.pb.time)}${best.time<=v.pb.time+0.001?" — set this session":""}`
    +(corners?` · ${corners.length} corners mapped`:"")+`</div>`;
@@ -4872,63 +4822,173 @@ function speedAtFrac(l,frac){
  return a.spd+f*(b.spd-a.spd);
 }
 let anaLaps=null;
+// ================= the compare module =================
+// One lap vs another — from this session, an earlier outing, or a friend's
+// imported/shared session — with a scrubber that walks all three views at
+// once, so you can find the exact spot a gap opens. Charts are anchored to
+// your mapped corners (shaded bands), not raw percentages.
+let cmp={otherLaps:null, otherLabel:"", frac:0.5, A:null, B:null, dl:null, sA:null, sB:null};
+function getVenueCorners(){
+ const s=anaSessionId?db.sessions.find(x=>x.id===anaSessionId):null;
+ const v=(s && !s.imported && s.trackId)?(db.venues||{})[s.trackId]:null;
+ return (v&&v.corners)||null;
+}
+function fillCmpSrc(){
+ const sel=document.getElementById("cmpSrc"); if(!sel) return;
+ const others=[...db.sessions].filter(s=>s.id!==anaSessionId).sort((a,b)=>b.startedAt-a.startedAt);
+ sel.innerHTML=`<option value="this">vs this session</option>`
+  +others.map(s=>`<option value="${s.id}">vs ${sessLabel(s)}</option>`).join("");
+ cmp.otherLaps=null; cmp.otherLabel="";
+}
+function cmpSrcChange(){
+ const sel=document.getElementById("cmpSrc");
+ if(sel.value==="this"){ cmp.otherLaps=null; cmp.otherLabel=""; fillCmpB(); renderCompare(); return; }
+ const s=db.sessions.find(x=>x.id===sel.value);
+ const res=s?analysisLapsFor(s):{err:"session not found"};
+ if(res.err){ alert("Can't compare against that session: "+res.err); sel.value="this";
+  cmp.otherLaps=null; cmp.otherLabel=""; fillCmpB(); renderCompare(); return; }
+ const thr=outThreshold(res.laps.map(l=>l.time));
+ res.laps.forEach(l=>{ l.out=l.time>thr && l!==res.best; });
+ cmp.otherLaps=res.laps;
+ cmp.otherLabel=(s.driver||sessLabel(s)).split("·")[0].trim();
+ fillCmpB(); renderCompare();
+}
+function fillCmpB(){
+ const sel=document.getElementById("cmpB"); if(!sel) return;
+ const laps=(cmp.otherLaps||anaLaps||[]).filter(l=>!l.out);
+ sel.innerHTML=laps.map(l=>
+  `<option value="${l.n}">${cmp.otherLabel?cmp.otherLabel+" ":""}L${l.n} — ${fmtT(l.time)}</option>`).join("");
+ if(laps.length){
+  const best=laps.reduce((a,b)=>a.time<b.time?a:b);
+  // vs self: default to 2nd best so there's something to see
+  if(!cmp.otherLaps && laps.length>1 && anaLaps){
+   const sorted=[...laps].sort((a,b)=>a.time-b.time);
+   sel.value=(sorted[1]||sorted[0]).n;
+  } else sel.value=best.n;
+ }
+}
+function cornerBands(x,w,h,corners){
+ if(!corners) return;
+ x.save();
+ for(const c of corners){
+  const X0=5+c.f0*(w-10), X1=5+c.f1*(w-10);
+  x.fillStyle="rgba(127,115,88,.13)";
+  x.fillRect(X0,0,Math.max(2,X1-X0),h);
+  x.fillStyle="rgba(127,115,88,.85)"; x.font="bold 9px sans-serif"; x.textAlign="center";
+  x.fillText("T"+c.n,(X0+X1)/2,h-3);
+ }
+ x.restore();
+}
 function renderCompare(){
- if(!anaLaps || anaLaps.length<2) return;
- const A=anaLaps.find(l=>l.n==+document.getElementById("cmpA").value)||anaLaps[0];
- const B=anaLaps.find(l=>l.n==+document.getElementById("cmpB").value)||anaLaps[1];
- if(A===B){ document.getElementById("cmptxt").textContent="Pick two different laps."; return; }
+ if(!anaLaps || !anaLaps.length) return;
+ const A=anaLaps.find(l=>l.n==+document.getElementById("cmpA").value)
+        ||anaLaps.reduce((a,b)=>a.time<b.time?a:b);
+ const lapsB=(cmp.otherLaps||anaLaps);
+ const B=lapsB.find(l=>l.n==+document.getElementById("cmpB").value)||lapsB[0];
+ if(!B || (A===B)){
+  document.getElementById("cmptxt").textContent=
+   "Pick two different laps — or choose another session in the middle dropdown.";
+  return;
+ }
  const N=220;
- const dl=Array.from({length:N},(_,i)=>
-  lapElapsedAt(B,i/(N-1))-lapElapsedAt(A,i/(N-1)));
- // --- map: lap A's line, coloured by who's locally faster
+ cmp.A=A; cmp.B=B;
+ cmp.dl=Array.from({length:N},(_,i)=>lapElapsedAt(B,i/(N-1))-lapElapsedAt(A,i/(N-1)));
+ cmp.sA=Array.from({length:N},(_,i)=>speedAtFrac(A,i/(N-1)));
+ cmp.sB=Array.from({length:N},(_,i)=>speedAtFrac(B,i/(N-1)));
+ drawCompare();
+}
+function drawCompare(){
+ const A=cmp.A, B=cmp.B, dl=cmp.dl;
+ if(!A||!B||!dl) return;
+ const N=dl.length, frac=cmp.frac;
+ const corners=getVenueCorners();
+ const nameA="you L"+A.n, nameB=(cmp.otherLabel||"")+(cmp.otherLabel?" ":"L")+B.n;
+ // --- map: A's line, coloured by who's locally faster; cursor dot
  {
   const cW=document.getElementById("cmpmap").clientWidth||300;
-  const [x,w,h]=cv2d("cmpmap",Math.round(cW*0.62));
+  const [x,w,h]=cv2d("cmpmap",Math.round(cW*0.55));
   const rows=A.rows;
   const xs=rows.map(p=>p.x), ys=rows.map(p=>p.y);
   const x0=Math.min(...xs),x1=Math.max(...xs),y0=Math.min(...ys),y1=Math.max(...ys);
   const sc=Math.min((w-20)/(x1-x0||1),(h-20)/(y1-y0||1));
   const d0=rows[0].d, dTot=rows[rows.length-1].d-d0||1;
   x.lineWidth=5; x.lineCap="round";
+  let cx=10, cy=h-10;
   for(let i=1;i<rows.length;i++){
-   const frac=(rows[i].d-d0)/dTot;
-   const j=Math.min(N-2,Math.floor(frac*(N-1)));
-   const slope=dl[j+1]-dl[j];            // <0: B gaining here, >0: A gaining
-   x.strokeStyle=Math.abs(slope)<0.004?"#999":(slope<0?"#2c2":"#e33");
+   const f=(rows[i].d-d0)/dTot;
+   const j=Math.min(N-2,Math.floor(f*(N-1)));
+   const slope=dl[j+1]-dl[j];
+   x.strokeStyle=Math.abs(slope)<0.004?"#999":(slope<0?"#e33":"#2c2");  // red = they gain
    x.beginPath();
    x.moveTo(10+(rows[i-1].x-x0)*sc, h-10-(rows[i-1].y-y0)*sc);
    x.lineTo(10+(rows[i].x-x0)*sc, h-10-(rows[i].y-y0)*sc);
    x.stroke();
+   if(f<=frac){ cx=10+(rows[i].x-x0)*sc; cy=h-10-(rows[i].y-y0)*sc; }
   }
-  x.fillStyle="#888"; x.font="11px sans-serif";
-  x.fillText(`green = lap ${B.n} faster · red = lap ${A.n} faster`,10,14);
+  x.fillStyle="#fff"; x.beginPath(); x.arc(cx,cy,7,0,7); x.fill();
+  x.fillStyle="#1A1A1A"; x.beginPath(); x.arc(cx,cy,4.5,0,7); x.fill();
+  x.fillStyle="#888"; x.font="11px sans-serif"; x.textAlign="left";
+  x.fillText(`green = ${nameA} faster here · red = ${nameB} faster`,10,14);
  }
- // --- A-vs-B delta trace
+ // --- speed overlay
  {
-  const [x,w,h]=cv2d("cmpdelta",130);
+  const [x,w,h]=cv2d("cmpspd",120);
+  cornerBands(x,w,h,corners);
+  const vmax=Math.max(...cmp.sA,...cmp.sB)*1.05||1;
+  const line=(arr,color,width)=>{
+   x.strokeStyle=color; x.lineWidth=width; x.beginPath();
+   arr.forEach((v,i)=>{
+    const X=5+i/(N-1)*(w-10), Y=h-6-(v/vmax)*(h-22);
+    i?x.lineTo(X,Y):x.moveTo(X,Y);
+   });
+   x.stroke();
+  };
+  line(cmp.sB,"#CC0000",1.8);
+  line(cmp.sA,"#1f8a4c",2.6);
+  const X=5+frac*(w-10);
+  x.strokeStyle="rgba(0,0,0,.55)"; x.lineWidth=1.5;
+  x.beginPath(); x.moveTo(X,0); x.lineTo(X,h); x.stroke();
+  x.fillStyle="#888"; x.font="11px sans-serif"; x.textAlign="left";
+  x.fillText(`speed — thick green ${nameA}, red ${nameB}`,8,11);
+ }
+ // --- gap trace (them minus you): above the line = you're ahead
+ {
+  const [x,w,h]=cv2d("cmpdelta",120);
+  cornerBands(x,w,h,corners);
   const dmax=Math.max(0.3,...dl.map(Math.abs));
-  x.strokeStyle="#888"; x.beginPath();
-  x.moveTo(0,h/2); x.lineTo(w,h/2); x.stroke();
-  x.strokeStyle="#CC0000"; x.lineWidth=2.5; x.beginPath();
+  for(let i=0;i<N;i++){
+   const X=5+i/(N-1)*(w-10), Y=h/2-dl[i]/dmax*(h/2-14);
+   x.fillStyle=dl[i]>=0?"rgba(44,160,70,.20)":"rgba(204,0,0,.20)";
+   x.fillRect(X-((w-10)/N)/2, Math.min(h/2,Y), Math.max(1,(w-10)/N), Math.abs(h/2-Y));
+  }
+  x.strokeStyle="#888"; x.beginPath(); x.moveTo(0,h/2); x.lineTo(w,h/2); x.stroke();
+  x.strokeStyle="#1A1A1A"; x.lineWidth=2; x.beginPath();
   dl.forEach((v,i)=>{
-   const X=i/(N-1)*(w-10)+5, Y=h/2+v/dmax*(h/2-10);
+   const X=5+i/(N-1)*(w-10), Y=h/2-v/dmax*(h/2-14);
    i?x.lineTo(X,Y):x.moveTo(X,Y);
   });
   x.stroke();
-  x.fillStyle="#888"; x.font="11px sans-serif";
-  x.fillText(`lap ${B.n} minus lap ${A.n} · ±${dmax.toFixed(1)}s`,8,12);
+  const X=5+frac*(w-10);
+  x.strokeStyle="rgba(0,0,0,.55)"; x.lineWidth=1.5;
+  x.beginPath(); x.moveTo(X,0); x.lineTo(X,h); x.stroke();
+  x.fillStyle="#888"; x.font="11px sans-serif"; x.textAlign="left";
+  x.fillText(`your lead over ${nameB} (±${dmax.toFixed(1)}s) — climbing = you're gaining`,8,11);
  }
- // biggest single swing
- let swingI=0, swing=0;
- for(let i=1;i<N;i++){
-  const s=dl[i]-dl[i-1];
-  if(Math.abs(s)>Math.abs(swing)){ swing=s; swingI=i; }
+ // --- readout at the cursor
+ {
+  const i=Math.min(N-1,Math.round(frac*(N-1)));
+  const c=corners&&corners.find(c=>frac>=c.f0-0.02&&frac<=c.f1+0.02);
+  const slope=i<N-1?dl[i+1]-dl[i]:0;
+  const tA=lapElapsedAt(A,frac)+A.a;
+  document.getElementById("cmptxt").innerHTML=
+   `<b>${Math.round(frac*100)}%${c?" · T"+c.n:""}</b> — `
+   +`you ${kmhOrMph(cmp.sA[i]).toFixed(0)} ${speedUnit()} vs ${kmhOrMph(cmp.sB[i]).toFixed(0)} · `
+   +`gap ${dl[i]>=0?"you +":""}${dl[i].toFixed(2)}s`
+   +(Math.abs(slope)>0.004?(slope>0?" and gaining":" and losing"):"")
+   +` <button class="minib" style="font-size:.75em" onclick="coachJump(${tA.toFixed(2)})">📍 MAP</button>`;
  }
- document.getElementById("cmptxt").textContent=
-  `Final gap: ${dl[N-1]>=0?"+":""}${dl[N-1].toFixed(2)}s (lap ${B.n} vs lap ${A.n}). `
-  +`Biggest swing around ${Math.round(swingI/(N-1)*100)}% distance `
-  +`(${swing<0?`lap ${B.n}`:`lap ${A.n}`} much stronger there).`;
 }
+function cmpScrubMove(val){ cmp.frac=val/1000; drawCompare(); }
 function renderAnalysis(laps,best,I,fname,accel){
  document.getElementById("anaout").style.display="block";
  anaLaps=laps;
@@ -4945,11 +5005,7 @@ function renderAnalysis(laps,best,I,fname,accel){
  // in/out or paddock lap, not a real one. Grey them, keep them off the charts.
  const _thr=outThreshold(laps.map(l=>l.time));
  laps.forEach(l=>{ l.out = l.time>_thr && l!==best; });
- const single=laps.length<2;
- const cmpCard=document.getElementById("cmpmap").closest(".card");
- const delCard=document.getElementById("anadel").closest(".card");
- if(cmpCard) cmpCard.style.display=single?"none":"";
- if(delCard) delCard.style.display=single?"none":"";
+ // (compare module stays even with one lap — other sessions can supply lap B)
  const nSec=Math.max(...laps.map(l=>l.sec.length));
  const nOut=laps.filter(l=>l.out).length;
  document.getElementById("anasum").textContent=
@@ -4966,77 +5022,20 @@ function renderAnalysis(laps,best,I,fname,accel){
     `<td>${l.out?"":(l.sec[i]!=null?l.sec[i].toFixed(2):"--")}</td>`).join("")
   +"</tr>").join("");
  renderSectorAnalysis(laps.filter(l=>!l.out),best,nSec);
+ coachLapN=null;   // fresh session → coach defaults to the best lap
  renderCoach(laps,best);
- // populate lap-comparison pickers: default best vs second best (real laps only)
+ // comparison module: lap A from this session; source dropdown adds any other
+ // session's laps (yours or an imported friend's) as lap B
  const sorted=[...laps].filter(l=>!l.out).sort((a,b)=>a.time-b.time);
- const opts=laps.filter(l=>!l.out).map(l=>
-  `<option value="${l.n}">Lap ${l.n} — ${fmtT(l.time)}</option>`).join("");
- const selA=document.getElementById("cmpA"), selB=document.getElementById("cmpB");
- selA.innerHTML=opts; selB.innerHTML=opts;
- selA.value=(sorted[0]||laps[0]).n;
- selB.value=(sorted[1]||sorted[0]||laps[0]).n;
+ const selA=document.getElementById("cmpA");
+ selA.innerHTML=laps.filter(l=>!l.out).map(l=>
+  `<option value="${l.n}">L${l.n} — ${fmtT(l.time)}</option>`).join("");
+ if(sorted.length) selA.value=sorted[0].n;
+ fillCmpSrc();
+ fillCmpB();
+ cmp.frac=0.5;
+ const scb=document.getElementById("cmpScrub"); if(scb) scb.value=500;
  renderCompare();
- // (the old speed-coloured canvas track map is gone — the live Leaflet map at
- //  the top of this view is the track map now)
- // --- speed vs distance
- {
-  const [x,w,h]=cv2d("anaspd",170);
-  const vmax=Math.max(...laps.flatMap(l=>l.rows.map(p=>p.spd)))*3.6;
-  laps.filter(l=>!l.out).forEach((l,li)=>{
-   const d0=l.rows[0].d, dTot=l.rows[l.rows.length-1].d-d0||1;
-   x.strokeStyle=l===best?INK:`hsl(${li*57},70%,55%)`;
-   x.lineWidth=l===best?2.4:1; x.globalAlpha=l===best?1:.55;
-   x.beginPath();
-   l.rows.forEach((p,i)=>{
-    const X=(p.d-d0)/dTot*(w-10)+5, Y=h-8-(p.spd*3.6/vmax)*(h-20);
-    i?x.lineTo(X,Y):x.moveTo(X,Y);
-   });
-   x.stroke();
-  });
-  x.globalAlpha=1; x.fillStyle=MUT; x.font="11px sans-serif";
-  x.fillText("y: 0–"+vmax.toFixed(0)+" km/h · thick = best lap",8,12);
-  x.fillText("x: lap distance 0→100%",w-140,h-4);
- }
- wireChartReadout("anaspd", frac=>{
-  const others=laps.filter(l=>!l.out&&l!==best).map(l=>
-   `L${l.n} ${kmhOrMph(speedAtFrac(l,frac)).toFixed(0)}`).slice(0,3).join(" · ");
-  return `at ${(frac*100).toFixed(0)}%: best lap ${kmhOrMph(speedAtFrac(best,frac)).toFixed(0)} ${speedUnit()}`
-   +(others?` · ${others}`:"");
- });
- // --- delta vs distance (only meaningful with 2+ laps)
- if(!single){
-  const [x,w,h]=cv2d("anadel",170);
-  const elapsedAt=(l,frac)=>{
-   const d0=l.rows[0].d, dTot=l.rows[l.rows.length-1].d-d0||1;
-   const target=d0+frac*dTot;
-   let i=l.rows.findIndex(p=>p.d>=target);
-   if(i<1) i=1;
-   const a=l.rows[i-1], b=l.rows[i];
-   const f=(target-a.d)/((b.d-a.d)||1);
-   return a.t+f*(b.t-a.t)-l.a;
-  };
-  const N=160, deltas=laps.filter(l=>l!==best && !l.out).map(l=>({l:l,
-   v:Array.from({length:N},(_,i)=>elapsedAt(l,i/(N-1))-elapsedAt(best,i/(N-1)))}));
-  const dmax=Math.max(1,...deltas.flatMap(d=>d.v.map(Math.abs)));
-  x.strokeStyle=AX; x.beginPath();
-  x.moveTo(0,h/2); x.lineTo(w,h/2); x.stroke();
-  deltas.forEach((d,di)=>{
-   x.strokeStyle=`hsl(${di*57},70%,55%)`; x.lineWidth=1.4; x.beginPath();
-   d.v.forEach((v,i)=>{
-    const X=i/(N-1)*(w-10)+5, Y=h/2+v/dmax*(h/2-12);
-    i?x.lineTo(X,Y):x.moveTo(X,Y);
-   });
-   x.stroke();
-  });
-  x.fillStyle=MUT; x.font="11px sans-serif";
-  x.fillText("y: ±"+dmax.toFixed(1)+"s vs best lap "+best.n+" (above line = losing time)",8,12);
-  x.fillText("x: lap distance 0→100%",w-140,h-4);
-  wireChartReadout("anadel", frac=>{
-   const vals=laps.filter(l=>l!==best&&!l.out).slice(0,4).map(l=>
-    `L${l.n} ${(elapsedAt(l,frac)-elapsedAt(best,frac)>=0?"+":"")}${(elapsedAt(l,frac)-elapsedAt(best,frac)).toFixed(2)}s`);
-   return `at ${(frac*100).toFixed(0)}%: `+vals.join(" · ");
-  });
- }
  // --- g-g
  {
   const [x,w,h]=cv2d("anagg",Math.min(260,document.getElementById("anagg").clientWidth||260));
