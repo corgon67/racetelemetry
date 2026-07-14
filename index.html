@@ -1046,6 +1046,12 @@ function setMode(mode){
 function activeSession(){ return db.sessions.find(s=>s.id===db.activeSessionId) || null; }
 function startSession(){
  if(activeSession()) return;
+ // starting a session while nothing is feeding the phone is almost always a
+ // mistake (field report: session started disconnected, captured nothing)
+ if(!rxChar && !demo && pg.watch==null &&
+    !confirm("Not connected to the logger (and phone GPS is off).\n\n"
+     +"The phone will capture nothing until it reconnects. The logger's own "
+     +"recording is unaffected either way.\n\nStart the session anyway?")) return;
  const t=tr();
  const s={id:"sess"+Date.now(), trackId:t.id, trackName:t.name, mode:t.mode,
    startedAt:Date.now(), endedAt:null, attempts:[], track:[]};
@@ -1207,22 +1213,28 @@ function onTelemetry(hex){
   if(ty===71 && p+41<=n){                 // GPS record: position + latched IMU
    const ms=dv.getUint32(p+1,true);
    const la=dv.getInt32(p+9,true)/1e7, lo=dv.getInt32(p+13,true)/1e7, fx=b[p+25];
-   if(ms>=liveMs){ liveMs=ms; liveLa=la; liveLo=lo; liveFix=fx; }
-   if(buffering){
+   const ay=dv.getInt16(p+31,true)/1000;
+   // sanity gate: pre-fix records carry garbage coordinates, and a desynced
+   // parse can fabricate absurd values — buffering either poisons the saved
+   // replay (a real session once drew its map across the whole planet)
+   const sane=fx>=3 && fx<=6 && Math.abs(la)<=90 && Math.abs(lo)<=180
+     && Math.abs(ay)<8 && ms<0x7F000000;
+   if(ms>=liveMs && sane){ liveMs=ms; liveLa=la; liveLo=lo; liveFix=fx; }
+   if(buffering && sane){
     if(hiResMs0===null) hiResMs0=ms;
     if(hiResLastMs===null||ms>hiResLastMs) hiResLastMs=ms;
     hiResBuf.push({ms, pos:1, la, lo,
      v:dv.getUint16(p+21,true)/100, fix:fx,
-     ax:dv.getInt16(p+29,true)/1000, ay:dv.getInt16(p+31,true)/1000});
+     ax:dv.getInt16(p+29,true)/1000, ay});
    }
    p+=41;
   }else if(ty===73 && p+17<=n){           // IMU-only record (between GPS fixes)
    const ms=dv.getUint32(p+1,true);
-   if(buffering){
+   const ax=dv.getInt16(p+5,true)/1000, ay=dv.getInt16(p+7,true)/1000;
+   if(buffering && Math.abs(ax)<8 && Math.abs(ay)<8 && ms<0x7F000000){
     if(hiResMs0===null) hiResMs0=ms;
     if(hiResLastMs===null||ms>hiResLastMs) hiResLastMs=ms;
-    hiResBuf.push({ms, pos:0,
-     ax:dv.getInt16(p+5,true)/1000, ay:dv.getInt16(p+7,true)/1000});
+    hiResBuf.push({ms, pos:0, ax, ay});
    }
    p+=17;
   }else p++;                              // resync on any stray byte
@@ -1277,6 +1289,21 @@ function sessionHiRes(s){
  if(s.id===db.activeSessionId && hiResBuf.length) return buildHiRes(hiResBuf);
  if(s.hasHires){ const h=loadHires(s.id); if(h&&h.length) return h; }
  return s.hires||[];
+}
+// Scrub physically-impossible points out of a saved sample array: sessions
+// recorded before the ingestion sanity gate carry pre-fix GPS records with
+// garbage coordinates (and the odd corrupt timestamp). The median position is
+// robust against them; anything >~0.5° (~50 km) away in one session is junk.
+function dropJunkPoints(src){
+ const lat=[], lon=[];
+ for(const p of src) if(p.la&&p.lo){ lat.push(p.la); lon.push(p.lo); }
+ if(lat.length<10) return src.filter(p=>p.la&&p.lo);
+ lat.sort((a,b)=>a-b); lon.sort((a,b)=>a-b);
+ const mla=lat[lat.length>>1], mlo=lon[lon.length>>1];
+ const ok=src.filter(p=>p.la&&p.lo
+   &&Math.abs(p.la-mla)<0.5&&Math.abs(p.lo-mlo)<0.5
+   &&(p.fix===undefined||p.fix>=3));
+ return ok.length>=10?ok:src.filter(p=>p.la&&p.lo);
 }
 // ---------------- HISTORY tab: card feed; a tap opens the session view ----------------
 // Data vintage at a glance — sets expectations BEFORE reading any numbers:
@@ -1373,6 +1400,10 @@ function openSessionView(sessId){
  }
  const hr=sessionHiRes(s), hires=hr.length>=20;
  let src=hires?hr:sessionTrail(s);   // let: repairTimeAxis may replace it below
+ // already-saved sessions can carry pre-fix junk records (garbage coordinates
+ // that painted the map "all over the world"). Points >~50 km from the median
+ // position are physically impossible within one session — drop them.
+ if(src && src.length>20) src=dropJunkPoints(src);
  const d=new Date(s.startedAt);
  const title=`${s.trackName} · ${d.toLocaleDateString([],{month:'short',day:'numeric'})} ${d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`;
  openAna(title);
@@ -1426,32 +1457,66 @@ function openSessionView(sessId){
  }, 120);
 }
 // runs table + session actions inside the session view
-function renderSvRuns(s){
+// ONE lap table. Times come from the line (exact, live-timed); sector columns
+// come from the recomputed analysis, paired to each lap by time proximity.
+// Two separate tables confused even the author — never bring them back.
+function renderSvRuns(s, unified){
  const el=document.getElementById("svRuns"); if(!el) return;
  const stage=s.mode==="stage", Word=stage?"Run":"Lap", word=Word.toLowerCase();
  const live=s.id===db.activeSessionId, n=s.attempts.length;
  const best=n?Math.min(...s.attempts.map(a=>a.time)):null;
+ const nSec=unified?unified.nSec:0;
  let rows;
  if(n){
   const thr=outThreshold(s.attempts.map(a=>a.time));
   const isOut=a=>a.time>thr && a.time!==best;
   rows=s.attempts.map((a,i)=>{
    const out=isOut(a);
+   const sec=unified?unified.sec[i]:null;
+   const secCells=Array.from({length:nSec},(_,j)=>
+    `<td>${(sec&&sec[j]!=null)?sec[j].toFixed(2):"–"}</td>`).join("");
    return `<tr class="${a.time===best?'best':''}" style="${out?'opacity:.45':''}"><td>${a.n}</td><td>${fmt(a.time)}</td>`
    +`<td>${out?'OUT':(a.time===best?'BEST':'+'+(a.time-best).toFixed(2))}</td>`
+   +secCells
    +`<td><button class="minib" onclick="viewAttemptReplay('${s.id}',${i})">MAP</button> `
    +`<button class="minib bad" onclick="deleteAttempt('${s.id}',${i})">🗑</button></td></tr>`;
   }).reverse().join("");
  } else {
-  rows=`<tr><td colspan="4" class="muted" style="text-align:left">`
+  rows=`<tr><td colspan="${4+nSec}" class="muted" style="text-align:left">`
    +`No completed ${word}s in this session`+(live?" yet — timing is armed and waiting.":".")+`</td></tr>`;
  }
  el.innerHTML=`
   <div class="muted" style="padding:8px 2px 4px;font-size:.78em;text-transform:uppercase;letter-spacing:.04em">
-   ${Word}s — timed AT THE LINE ${vintageBadge(s)} ${live?'<span class="badge live">LIVE</span>':''} · tap MAP to see one</div>
-  <table style="margin-bottom:10px"><thead>
-   <tr><th>${Word}</th><th>Time</th><th>Delta</th><th></th></tr></thead>
-   <tbody>${rows}</tbody></table>`;
+   ${Word}s ${vintageBadge(s)} ${live?'<span class="badge live">LIVE</span>':''} · tap MAP to see one</div>
+  <table style="margin-bottom:${nSec?"2px":"10px"}"><thead>
+   <tr><th>${Word}</th><th>Time</th><th>Delta</th>${Array.from({length:nSec},(_,j)=>`<th>S${j+1}</th>`).join("")}<th></th></tr></thead>
+   <tbody>${rows}</tbody></table>`
+  +(nSec?`<div class="muted" style="font-size:.75em;margin-bottom:10px">times = at the line ·
+    sectors = recomputed from the recording (±0.1–0.2 s${sessionVintage(s)==="approx"?", ±1–2% on ≈CLOCK data":""})</div>`:"");
+}
+// pair recomputed laps to line-timed attempts and merge sectors into the one table
+function unifyLapsTable(laps){
+ const s=anaSessionId?db.sessions.find(x=>x.id===anaSessionId):null;
+ const head=document.getElementById("anahead");
+ const tbl=head?head.closest("table"):null;
+ if(!s || !s.attempts.length){ if(tbl) tbl.style.display=""; return; }
+ const nSec=Math.max(...laps.map(l=>l.sec.length));
+ const tol=sessionVintage(s)==="approx"?4:2.5;   // rebuilt clocks pair looser
+ const pool=laps.map(l=>({l,used:false}));
+ const secByAttempt=s.attempts.map(a=>{
+  let bestP=null, bd=tol;
+  for(const p of pool){
+   if(p.used) continue;
+   const d=Math.abs(p.l.time-a.time);
+   if(d<bd){ bd=d; bestP=p; }
+  }
+  if(bestP){ bestP.used=true; return bestP.l.sec; }
+  return null;
+ });
+ if(nSec>0 && secByAttempt.some(Boolean)){
+  if(tbl) tbl.style.display="none";           // the merged table replaces it
+  renderSvRuns(s,{sec:secByAttempt, nSec});
+ } else if(tbl) tbl.style.display="";          // no sectors/pairs — keep the raw table
 }
 // ---------------- head-to-head: any two sessions, no re-import ----------------
 // Compute a session's laps headlessly (same pipeline as the session view but
@@ -1470,7 +1535,7 @@ function analysisLapsFor(s){
  const sg=gates.find(g=>g.role===(stage?"start":"startfinish"));
  const fg=stage?gates.find(g=>g.role==="finish"):sg;
  if(!sg || (stage&&!fg)) return {err:"no start line on its track"};
- const pts=src.filter(p=>p.la&&p.lo).map(p=>({lat:p.la,lon:p.lo,spd:p.v||0,t:p.t||0}));
+ const pts=dropJunkPoints(src).map(p=>({lat:p.la,lon:p.lo,spd:p.v||0,t:p.t||0}));
  if(pts.length<20) return {err:"not enough GPS points"};
  project(pts);
  let laps=[];
@@ -2110,6 +2175,7 @@ function renderReplayBar(){
    vertical-align:middle;margin-right:2px"></span>${l}</span>`;
  bar.innerHTML=btn(rpPlaying, rpPlaying?"❚❚ PAUSE":"▶ PLAY","replayPlayToggle()")
   +btn(rpSpeed!==1, rpSpeed+"×","replaySpeedCycle()")
+  +btn(replayMapTall,"◱ BIG MAP","toggleReplayTall()")
   +modes.map(([m,l])=>btn(replayMode===m,l,`setReplayMode('${m}')`)).join("")
   +(replayMode==="phase"?btn(replayZones,replayZones?"ZONES":"RAW","toggleReplayOpt('zones')"):"")
   +(replayMode==="phase"&&replayZones?btn(replayCorners,"CORNERS","toggleReplayOpt('corners')"):"")
@@ -2257,6 +2323,17 @@ function replaySpeedCycle(){
  rpSpeed=rpSpeed===1?2:(rpSpeed===2?4:1);
  renderReplayBar();
 }
+// BIG MAP: grow the hero map to most of the screen — the HUD boxes and cards
+// below stay reachable by scrolling, and each card long-press-folds to its
+// header if you want a lean review layout (that's remembered).
+let replayMapTall=false;
+function toggleReplayTall(){
+ replayMapTall=!replayMapTall;
+ const m=document.getElementById("replayMap");
+ if(m) m.style.height=replayMapTall?"76vh":"44vh";
+ renderReplayBar();
+ setTimeout(()=>{ if(replayMap) replayMap.invalidateSize(); },80);
+}
 function scrubReplay(val){
  if(!replayData || !replayMap) return;
  const pts=replayData.samples;
@@ -2397,6 +2474,15 @@ document.addEventListener("visibilitychange", ()=>{
   // Chrome dropped BLE notifications while the screen was off — the logger's
   // flash still has those records, so ask it to re-stream the gap
   requestBackfill();
+  // and if the link itself died while the screen was off, get back on it
+  // without waiting for a tap (field report: no auto-reconnect after wake)
+  if(!rxChar && !demo && bleDev){
+   conStatus("Reconnecting…");
+   wireUpDevice(bleDev).then(()=>conStatus("")).catch(()=>{
+    conStatus("Logger not reachable — watching for it…");
+    watchForDevice(bleDev);
+   });
+  }
  }
 });
 
@@ -5021,6 +5107,10 @@ function renderAnalysis(laps,best,I,fname,accel){
   +Array.from({length:nSec},(_,i)=>
     `<td>${l.out?"":(l.sec[i]!=null?l.sec[i].toFixed(2):"--")}</td>`).join("")
   +"</tr>").join("");
+ // fold the recomputed sectors into the ONE runs table up top; the raw
+ // recomputed table above only stays visible if pairing fails
+ {const _t=document.getElementById("anahead")?.closest("table"); if(_t) _t.style.display="";}
+ unifyLapsTable(laps);
  renderSectorAnalysis(laps.filter(l=>!l.out),best,nSec);
  coachLapN=null;   // fresh session → coach defaults to the best lap
  renderCoach(laps,best);
