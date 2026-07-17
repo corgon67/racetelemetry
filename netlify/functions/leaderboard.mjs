@@ -35,11 +35,11 @@ export default async (req) => {
     if (!/^[a-z0-9.x-]{5,60}$/.test(key))
       return new Response("bad key", { status: 400 });
     const { blobs } = await store.list({ prefix: key + "/" });
-    const entries = [];
-    for (const bl of blobs.slice(0, 200)) {
-      const e = await store.get(bl.key, { type: "json" }).catch(() => null);
-      if (e && typeof e.time === "number") entries.push(e);
-    }
+    // parallel reads — sequential fetches made big boards crawl (and the app
+    // now queries 3 adjacent lap-length buckets per view)
+    const got = await Promise.all(blobs.slice(0, 200).map(bl =>
+      store.get(bl.key, { type: "json" }).catch(() => null)));
+    const entries = got.filter(e => e && typeof e.time === "number");
     entries.sort((a, b) => a.time - b.time);
     const seen = new Set(), top = [];
     for (const e of entries) {

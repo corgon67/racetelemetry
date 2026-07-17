@@ -1054,7 +1054,8 @@ function startSession(){
      +"recording is unaffected either way.\n\nStart the session anyway?")) return;
  const t=tr();
  const s={id:"sess"+Date.now(), trackId:t.id, trackName:t.name, mode:t.mode,
-   startedAt:Date.now(), endedAt:null, attempts:[], track:[]};
+   startedAt:Date.now(), endedAt:null, attempts:[], track:[],
+   logger:(bleDev&&bleDev.name)||null};   // which physical unit recorded this
  db.sessions.push(s); db.activeSessionId=s.id;
  // arming: wipe any stale split/lap state so lap 1 starts clean, then push the
  // gate so the device (loop mode) begins timing on the next start-line crossing
@@ -1083,6 +1084,15 @@ function endSession(){
  // never "crosses" it, so no laps are counted until you START TIMING again
  if(tr().mode==="loop") send("gate 0.000000,0.000000");
  saveDb(); renderSessionUI();
+ // auto-save the full session file to Downloads on every end: phone storage is
+ // small and prunable, a .json in Downloads is forever (and shareable as-is).
+ // MENU → AUTO-SAVE FILES toggles it off.
+ if(settings.autoSaveSession!==false && (s.attempts.length || s.track.length>50)){
+  try{
+   download(`racelog_${(s.trackName||"session").replace(/[^\w]+/g,"_")}_${stamp()}.json`,
+    JSON.stringify(sessionBundle(s)), "application/json");
+  }catch(_){}
+ }
  // fold the outing into venue memory and show the three-line debrief
  try{
   const d=updateVenueMemory(s);
@@ -1702,17 +1712,45 @@ function lbHtml(top,count){
  +`<div class="muted" style="margin-top:4px;font-size:.78em">${count} entr${count===1?"y":"ies"} ·
     best per driver · club-trust, times unverified — VIEW opens the actual lap</div>`;
 }
+// Lap length is measured from each driver's OWN line, so two people at the
+// same venue can straddle a 100 m bucket boundary and fork the board. Reads
+// merge the neighbouring buckets (submits stay in their exact bucket).
+async function lbFetchMerged(t, lapLenM){
+ const len=Math.max(1,Math.round((lapLenM||0)/100));
+ const keys=[...new Set([len-1,len,len+1].filter(x=>x>=1)
+   .map(x=>venueKeyRaw(t,x*100)))].filter(Boolean);
+ let all=[], count=0, anyOk=false;
+ for(const k of keys){
+  try{
+   const r=await fetch("/api/lb/"+encodeURIComponent(k));
+   if(!r.ok) continue;
+   anyOk=true;
+   const j=await r.json();
+   all=all.concat(j.top||[]); count+=j.count||0;
+  }catch(_){}
+ }
+ if(!anyOk) throw new Error("server unreachable");
+ all.sort((a,b)=>a.time-b.time);
+ const seen=new Set(), top=[];
+ for(const e of all){
+  const k2=(e.driver||"").toLowerCase();
+  if(seen.has(k2)) continue;
+  seen.add(k2); top.push(e);
+  if(top.length>=20) break;
+ }
+ return {top,count};
+}
 async function lbRefresh(){
  const el=document.getElementById("lbBody"); if(!el) return;
  const s=anaSessionId?db.sessions.find(x=>x.id===anaSessionId):null;
  if(!s || !lastCoach){ el.textContent="Open a session with laps first."; return; }
- const key=venueKeyFor(s,lastCoach.best);
- if(!key){ el.textContent="This track has no start line set."; return; }
+ const t=db.tracks.find(x=>x.id===s.trackId);
+ const best=lastCoach.best;
+ const lapLen=best?(best.rows[best.rows.length-1].d-best.rows[0].d):0;
+ if(!venueKeyRaw(t,lapLen)){ el.textContent="This track has no start line set."; return; }
  el.textContent="Loading…";
  try{
-  const r=await fetch("/api/lb/"+encodeURIComponent(key));
-  if(!r.ok) throw new Error("server "+r.status);
-  const {top,count}=await r.json();
+  const {top,count}=await lbFetchMerged(t,lapLen);
   el.innerHTML=lbHtml(top,count);
  }catch(e){
   el.textContent="Couldn't load ("+(e.message||e)+"). Online, and backend deployed?";
@@ -1728,7 +1766,7 @@ async function lbSubmit(){
  if(!confirm(`Submit ${fmt(best.time)} as ${settings.driverName}?\n\nYour session uploads too, so others can VIEW the lap.`)) return;
  try{
   const r1=await fetch("/api/session",{method:"POST",
-   headers:{"content-type":"application/json"}, body:JSON.stringify(sessionBundle(s))});
+   headers:{"content-type":"application/json"}, body:bundleJsonFit(s)});
   const sid=r1.ok?(await r1.json()).id:null;
   const r=await fetch("/api/lb",{method:"POST",
    headers:{"content-type":"application/json"},
@@ -1802,6 +1840,7 @@ function renderTracksView(){
    <div class="segrow" style="margin-top:8px">
     ${t.id!==db.active?`<button class="minib" onclick="selectTrack(${t.id});renderTracksView()">SELECT</button>`:""}
     <button class="minib" onclick="lbLoadInto('lbt_${t.id}',${t.id})">LEADERBOARD</button>
+    <button class="minib" onclick="shareTrack(${t.id})">SHARE</button>
    </div>
    <div id="lbt_${t.id}" class="muted" style="font-size:.9em;margin-top:6px"></div>
   </div>`;
@@ -1813,13 +1852,10 @@ async function lbLoadInto(elId, trackId){
  const t=db.tracks.find(x=>x.id===trackId);
  const v=(db.venues||{})[trackId];
  if(!v || !v.lapLen){ el.textContent="Record a session here first — the board is keyed by lap length."; return; }
- const key=venueKeyRaw(t, v.lapLen);
- if(!key){ el.textContent="No start line set on this track."; return; }
+ if(!venueKeyRaw(t, v.lapLen)){ el.textContent="No start line set on this track."; return; }
  el.textContent="Loading…";
  try{
-  const r=await fetch("/api/lb/"+encodeURIComponent(key));
-  if(!r.ok) throw new Error("server "+r.status);
-  const {top,count}=await r.json();
+  const {top,count}=await lbFetchMerged(t, v.lapLen);
   el.innerHTML=lbHtml(top,count);
  }catch(e){ el.textContent="Couldn't load ("+(e.message||e)+")."; }
 }
@@ -1861,6 +1897,53 @@ function sessionBundle(s){
    gates:srcTrack?srcTrack.gates:[], outline:srcTrack?srcTrack.outline:null,
    attempts:s.attempts, trail10hz:sessionTrail(s), hires:sessionHiRes(s) };
 }
+// The server caps uploads at 8 MB; a long session's full-rate stream can
+// exceed it — thin the hi-res data (halve until it fits; lap TIMES are exact
+// regardless, only replay smoothness steps down).
+function bundleJsonFit(s){
+ const bundle=sessionBundle(s);
+ let json=JSON.stringify(bundle);
+ while(json.length>7500000 && bundle.hires && bundle.hires.length>2000){
+  bundle.hires=bundle.hires.filter((_,i)=>i%2===0);
+  json=JSON.stringify(bundle);
+ }
+ return json;
+}
+// SHARE TRACK: hand the whole group ONE link so every phone times against
+// IDENTICAL lines. Without this, seven hand-placed start lines differ by
+// metres — sector splits disagree, lap times drift, leaderboard keys fork.
+// Rides the existing /api/session store (kind:"track" marks it; attempts:[]
+// satisfies the server's session check).
+async function shareTrack(trackId){
+ const t=db.tracks.find(x=>x.id===trackId)||tr();
+ if(!(t.gates||[]).length){ alert("Set at least a start line on this track first."); return; }
+ const bundle={app:"RaceLogger", version:1, kind:"track", attempts:[],
+   track:t.name, mode:t.mode, gates:t.gates, outline:t.outline||undefined};
+ try{
+  const r=await fetch("/api/session",{method:"POST",
+   headers:{"content-type":"application/json"}, body:JSON.stringify(bundle)});
+  if(!r.ok) throw new Error("server "+r.status);
+  const {id}=await r.json();
+  const link=location.origin+location.pathname+"#t="+id;
+  try{
+   if(navigator.share){ await navigator.share({title:"RaceLogger track — "+t.name,
+    text:"Open this to get the exact start/finish & splits for "+t.name, url:link}); return; }
+  }catch(_){ /* cancelled — fall through */ }
+  try{ await navigator.clipboard.writeText(link); alert("Track link copied:\n"+link); }
+  catch(_){ prompt("Copy this link:", link); }
+ }catch(e){ alert("Couldn't upload the track: "+(e.message||e)); }
+}
+function importTrackBundle(b){
+ if(!b || b.kind!=="track" || !b.gates){ alert("That link isn't a RaceLogger track."); return; }
+ // merge by name so re-sharing an updated track updates it instead of duplicating
+ const nt=migrateTrack({id:Date.now(), name:b.track||"Shared track",
+   mode:b.mode||"loop", gates:b.gates, outline:b.outline||undefined});
+ const i=db.tracks.findIndex(x=>x.name===nt.name);
+ if(i>=0){ nt.id=db.tracks[i].id; db.tracks[i]=nt; } else db.tracks.push(nt);
+ db.active=nt.id;
+ renumberSplits(); saveDb(); refreshTrackSel(); renderSplitsRow();
+ alert(`Track “${nt.name}” imported and selected — you're timing on the exact same lines as everyone else.`);
+}
 // Cloud share: upload the bundle to this site's own backend (Netlify Function
 // + Blobs, /api/session) and hand out a plain link — the other phone just
 // opens it, no file juggling. Falls back with a clear message if the backend
@@ -1871,8 +1954,7 @@ async function uploadSession(id){
  anaMsg("Uploading session…");
  try{
   const r=await fetch("/api/session",{method:"POST",
-   headers:{"content-type":"application/json"},
-   body:JSON.stringify(sessionBundle(s))});
+   headers:{"content-type":"application/json"}, body:bundleJsonFit(s)});
   if(!r.ok) throw new Error("server replied "+r.status);
   const {id:sid}=await r.json();
   const link=location.origin+location.pathname+"#s="+sid;
@@ -2516,9 +2598,12 @@ async function wireUpDevice(dev){
   onBleChunk(new Uint8Array(dv.buffer,dv.byteOffset,dv.byteLength));
  });
  bleDev=dev;
+ // several units exist now — remember which one is OURS so auto-connect never
+ // grabs a friend's logger at a shared event, and show which unit we're on
+ if(dev.name){ settings.lastLogger=dev.name; saveSettings(); }
  stopDemo();
  stopPhoneGps();   // the logger's GPS takes over from the phone's
- showLive("");
+ showLive(dev.name&&dev.name.includes("-")?"#"+dev.name.split("-").pop():"");
  requestWakeLock();
  send("start");                    // recorder is always on — begin logging immediately
  send("hires 1");                  // 25/50 Hz stream is ALWAYS on while connected —
@@ -2559,7 +2644,10 @@ async function autoConnect(){
  let devices=[];
  try{ devices=await navigator.bluetooth.getDevices(); }
  catch(e){ conStatus("Auto-connect blocked: "+(e.message||e)); return; }
- const dev=devices.find(d=>d.name&&d.name.startsWith("RaceLogger"))||devices[0];
+ // prefer the exact unit used last (7 loggers may be paired at a club event);
+ // fall back to any RaceLogger, then anything remembered
+ const dev=devices.find(d=>d.name&&d.name===settings.lastLogger)
+  ||devices.find(d=>d.name&&d.name.startsWith("RaceLogger"))||devices[0];
  if(!dev){ conStatus("No paired logger remembered yet — tap Connect once to grant access.", true); return; }
  const btn=document.getElementById("connect");
  conStatus("Reconnecting to "+(dev.name||"logger")+"…");
@@ -2576,6 +2664,35 @@ async function autoConnect(){
 // Wait (best-effort) for a known device to advertise, then connect. Some Chrome
 // builds gate watchAdvertisements behind a flag — if so this is simply a no-op
 // and the driver connects with the button as before.
+// THE reconnect workhorse: a quiet retry loop, because one-shot attempts kept
+// failing in the field (screen-wake raced the radio; watchAdvertisements is
+// flag-gated on most phones and silently no-ops). Every 6 s while disconnected
+// and visible: try the known device, or rediscover one via getDevices() after
+// a page reload. gatt.connect() on Android can hang FOREVER on a device that
+// isn't in range — the 8 s timeout + gatt.disconnect() unjams it so the next
+// tick gets a fresh attempt instead of queueing behind a corpse.
+let reconBusy=false;
+setInterval(async()=>{
+ if(rxChar||demo||document.hidden||reconBusy) return;
+ if(settings.autoConnect===false || pg.watch!=null) return;
+ reconBusy=true;
+ try{
+  let dev=bleDev;
+  if(!dev && navigator.bluetooth && navigator.bluetooth.getDevices){
+   const ds=await navigator.bluetooth.getDevices().catch(()=>[]);
+   dev=ds.find(d=>d.name&&d.name===settings.lastLogger)
+     ||ds.find(d=>d.name&&d.name.startsWith("RaceLogger"));
+  }
+  if(dev){
+   await Promise.race([wireUpDevice(dev),
+    new Promise((_,rej)=>setTimeout(()=>rej(new Error("timeout")),8000))]);
+   conStatus("");
+  }
+ }catch(e){
+  if(bleDev) try{ bleDev.gatt.disconnect(); }catch(_){}
+ }
+ finally{ reconBusy=false; }
+},6000);
 async function watchForDevice(dev){
  if(!dev || rxChar || !dev.watchAdvertisements) return;
  try{
@@ -3726,6 +3843,7 @@ function openSettings(){
    voice coach speaks lap/run times &amp; split deltas · auto-connect re-links the
    last paired logger on load (after one manual connect)</div>
   <button class="b" style="background:var(--card2)" onclick="setDriverName()">DRIVER NAME${settings.driverName?": "+settings.driverName.toUpperCase():""}</button>
+  <button class="b" style="background:var(--card2)" onclick="settings.autoSaveSession=settings.autoSaveSession===false;saveSettings();openSettings()">AUTO-SAVE FILES: ${settings.autoSaveSession!==false?"ON":"OFF"}</button>
   <div class="muted" style="text-align:center;margin-bottom:8px">travels with shared sessions and
    labels head-to-head comparisons</div>
   <div class="l muted" style="margin:10px 0 6px;text-transform:uppercase;letter-spacing:.04em">Video</div>
@@ -5162,7 +5280,16 @@ setTimeout(initMini,150);   // live dashboard (incl. minimap) shows from load no
 // opened via a share link (#s=id)? fetch the session from our backend and
 // import it — the friction-free path: friend taps SHARE LINK, you tap the link
 (function(){
- const m=location.hash.match(/^#s=([a-z0-9]+)$/);
+ const mt=location.hash.match(/^#t=([a-z0-9]+)$/);   // shared TRACK (gates/splits)
+ if(mt){
+  history.replaceState(null,"",location.pathname+location.search);
+  fetch("/api/session/"+mt[1])
+   .then(r=>{ if(!r.ok) throw new Error("link not found ("+r.status+")"); return r.json(); })
+   .then(importTrackBundle)
+   .catch(e=>alert("Couldn't load the shared track: "+(e.message||e)));
+  return;
+ }
+ const m=location.hash.match(/^#s=([a-z0-9]+)$/);    // shared SESSION
  if(!m) return;
  history.replaceState(null,"",location.pathname+location.search);
  fetch("/api/session/"+m[1])
