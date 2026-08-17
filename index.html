@@ -1596,19 +1596,23 @@ function renderSvRuns(s, unified){
  const best=n?Math.min(...s.attempts.map(a=>a.time)):null;
  const nSec=unified?unified.nSec:0;
  const extra=(unified&&unified.extra)||[];   // laps the phone MISSED (screen off)
-                                             // but the logger recorded — first-class rows
- const bestAll=Math.min(best??Infinity, ...extra.map(l=>l.time));
+                                             // but the recording kept — first-class rows
+ // phantom attempts (double-crosses shorter than a real lap) must not own
+ // BEST — a 4.91 s ghost once made every real lap read "+105"
+ const minLap=settings.minLapS||10;
+ const validT=[...s.attempts.map(a=>a.time),...extra.map(l=>l.time)].filter(t=>t>=minLap);
+ const bestAll=validT.length?Math.min(...validT):null;
  let rows;
  if(n){
   const thr=outThreshold(s.attempts.map(a=>a.time));
-  const isOut=a=>a.time>thr && a.time!==best;
+  const isOut=a=>a.time>thr && a.time!==bestAll;
   rows=s.attempts.map((a,i)=>{
-   const out=isOut(a);
+   const short=a.time<minLap, out=!short&&isOut(a);
    const sec=unified?unified.sec[i]:null;
    const secCells=Array.from({length:nSec},(_,j)=>
     `<td>${(sec&&sec[j]!=null)?sec[j].toFixed(2):"–"}</td>`).join("");
-   return `<tr class="${a.time===bestAll?'best':''}" style="${out?'opacity:.45':''}"><td>${a.n}</td><td>${fmt(a.time)}</td>`
-   +`<td>${out?'OUT':(a.time===bestAll?'BEST':'+'+(a.time-bestAll).toFixed(2))}</td>`
+   return `<tr class="${a.time===bestAll?'best':''}" style="${(out||short)?'opacity:.45':''}"><td>${a.n}</td><td>${fmt(a.time)}</td>`
+   +`<td>${short?'SHORT':out?'OUT':(a.time===bestAll?'BEST':'+'+(a.time-bestAll).toFixed(2))}</td>`
    +secCells
    +`<td><button class="minib" onclick="viewAttemptReplay('${s.id}',${i})">MAP</button> `
    +`<button class="minib bad" onclick="deleteAttempt('${s.id}',${i})">🗑</button></td></tr>`;
@@ -1621,7 +1625,7 @@ function renderSvRuns(s, unified){
   const secCells=Array.from({length:nSec},(_,j)=>
    `<td>${l.sec[j]!=null?l.sec[j].toFixed(2):"–"}</td>`).join("");
   return `<tr class="${l.time===bestAll?'best':''}"><td>◦</td><td>${fmt(l.time)}</td>`
-  +`<td>${l.time===bestAll?'BEST':'+'+(l.time-bestAll).toFixed(2)}</td>`
+  +`<td>${l.time===bestAll?'BEST':bestAll?'+'+(l.time-bestAll).toFixed(2):''}</td>`
   +secCells
   +`<td><button class="minib" onclick="coachJump(${l.a.toFixed(2)})">MAP</button></td></tr>`;
  }).join("");
@@ -1631,8 +1635,8 @@ function renderSvRuns(s, unified){
   <table style="margin-bottom:${(nSec||extra.length)?"2px":"10px"}"><thead>
    <tr><th>${Word}</th><th>Time</th><th>Delta</th>${Array.from({length:nSec},(_,j)=>`<th>S${j+1}</th>`).join("")}<th></th></tr></thead>
    <tbody>${rows}</tbody></table>`
-  +((nSec||extra.length)?`<div class="muted" style="font-size:.75em;margin-bottom:10px">${extra.length?`◦ = ${extra.length} ${word}${extra.length===1?"":"s"} the phone missed, recovered from the logger's recording · `:""}times ${extra.length?"with a number":""} = at the line ·
-    sectors = recomputed from the recording (±0.1–0.2 s${sessionVintage(s)==="approx"?", ±1–2% on ≈CLOCK data":""})</div>`:"");
+  +((nSec||extra.length)?`<div class="muted" style="font-size:.75em;margin-bottom:10px">${extra.length?`◦ = ${extra.length} ${word}${extra.length===1?"":"s"} the phone missed live, found in ${sessionVintage(s)==="hires"?"the logger's recording":"this session's saved trail"} · `:""}times ${extra.length?"with a number":""} = at the line ·
+    sectors = recomputed (±0.1–0.2 s${sessionVintage(s)==="approx"?", ±1–2% on ≈CLOCK data":""})</div>`:"");
 }
 // pair recomputed laps to line-timed attempts; sectors merge into their rows,
 // and UNMATCHED laps (phone asleep, logger still recording) join the table as
@@ -2290,7 +2294,8 @@ function fetchHighRes(){
 // samples — nothing else required.
 let replayMap=null, replayLayers=[], replayCarMk=null, replayData=null;
 let replayCalc=null, replayMode="phase";
-let replayShowPts=true, replayShowG=true;
+let replayShowPts=true, replayShowG=false;   // corner-G labels off by default —
+                                             // they splatter at low zoom (field screenshot)
 let replayZones=true, replayPhases=null;   // ZONES: smoothed accel/brake regions
 let replayCorners=true;   // OFF folds corner zones into brake-in / power-out
 // At 25 Hz, per-sample phase colouring is confetti — a 50 ft acceleration is
@@ -2411,21 +2416,28 @@ function renderReplayBar(){
  const chip=(c,l)=>`<span style="font-size:.68em;color:var(--muted);white-space:nowrap">
   <span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${c};
    vertical-align:middle;margin-right:2px"></span>${l}</span>`;
+ // one calm row: transport + scope. Everything visual lives behind VIEW —
+ // seven always-on buttons buried the actual replay (field screenshot).
  bar.innerHTML=btn(rpPlaying, rpPlaying?"❚❚ PAUSE":"▶ PLAY","replayPlayToggle()")
   +btn(rpSpeed!==1, rpSpeed+"×","replaySpeedCycle()")
   +btn(replayMapTall,"◱ BIG MAP","toggleReplayTall()")
-  +modes.map(([m,l])=>btn(replayMode===m,l,`setReplayMode('${m}')`)).join("")
-  +(replayMode==="phase"?btn(replayZones,replayZones?"ZONES":"RAW","toggleReplayOpt('zones')"):"")
-  +(replayMode==="phase"&&replayZones?btn(replayCorners,"CORNERS","toggleReplayOpt('corners')"):"")
-  +btn(replayShowPts,"BRAKE/THR PTS","toggleReplayOpt('pts')")
-  +btn(replayShowG,"CORNER G","toggleReplayOpt('g')")
-  +(replayMode==="phase"
-    ?chip("#2c2","power")+chip("#e33","brake")
-     +(replayCorners?chip("#fb0","corner"):"")+chip("#79c","coast")
-    :"")
+  +btn(rpOptsOpen,"⚙ VIEW","toggleReplayOpts()")
   +(svScope?btn(true,"✕ "+svScope+" — FULL RUN","svShowFullRun()")
-           :(svRateLabel?`<span class="muted" style="font-size:.72em;padding:0 4px">FULL RUN · ${svRateLabel}</span>`:""));
+           :(svRateLabel?`<span class="muted" style="font-size:.72em;padding:0 4px">FULL RUN · ${svRateLabel}</span>`:""))
+  +(rpOptsOpen?`<div style="flex-basis:100%;height:0"></div>`
+   +modes.map(([m,l])=>btn(replayMode===m,l,`setReplayMode('${m}')`)).join("")
+   +(replayMode==="phase"?btn(replayZones,replayZones?"ZONES":"RAW","toggleReplayOpt('zones')"):"")
+   +(replayMode==="phase"&&replayZones?btn(replayCorners,"CORNERS","toggleReplayOpt('corners')"):"")
+   +btn(replayShowPts,"BRAKE/THR PTS","toggleReplayOpt('pts')")
+   +btn(replayShowG,"CORNER G","toggleReplayOpt('g')")
+   +(replayMode==="phase"
+     ?chip("#2c2","power")+chip("#e33","brake")
+      +(replayCorners?chip("#fb0","corner"):"")+chip("#79c","coast")
+     :"")
+   :"");
 }
+let rpOptsOpen=false;
+function toggleReplayOpts(){ rpOptsOpen=!rpOptsOpen; renderReplayBar(); }
 function setReplayMode(m){
  if(m==="delta"&&(!replayCalc||!replayCalc.delta)){
   alert("No other run in this session to compare against yet."); return;
@@ -3412,6 +3424,13 @@ function checkStage(){
  }
  if(fg && crossedGate(fg)){
   const t=(performance.now()-stageT0)/1000;
+  // a "run" shorter than the minimum lap is a false trigger (lines close
+  // together, or a double-cross) — a 4.91 s phantom once sat as BEST and
+  // pushed every real run's delta to +105 s. Discard and re-arm.
+  if(t<(settings.minLapS||10)){
+   stageT0=null; stageSplitsHit={}; replaySamples=[]; nextSplitIdx=0;
+   return;
+  }
   const wasBest=!stageBestRun || t<stageBestRun;
   stageRuns.push(t); if(stageRuns.length>8) stageRuns.shift();
   if(wasBest) stageBestRun=t;
