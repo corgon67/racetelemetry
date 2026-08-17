@@ -302,6 +302,15 @@
   </div>
   <div id="constatus" class="muted" style="text-align:center;margin:2px 2px 8px;
        font-size:.82em;min-height:1.1em"></div>
+  <div id="readyChip" style="display:none;text-align:center;font-weight:700;padding:8px;
+       border-radius:3px;border:2px solid var(--ink);margin:0 2px 8px;font-size:.92em"></div>
+  <div id="nvOffer" style="display:none;text-align:center;padding:8px;border-radius:3px;
+       border:2px solid var(--ink);background:var(--card2);margin:0 2px 8px;font-size:.92em">
+   Somewhere new? <button class="minib" onclick="nvStart()">SET UP IN 60 SECONDS</button>
+   <button class="minib" onclick="settings.nvDismissed=true;saveSettings();nvOffer(false)">✕</button></div>
+  <div id="lastRun" style="display:none;text-align:center;padding:8px;border-radius:3px;
+       border:2px solid var(--ink);background:var(--card);margin:0 2px 8px;font-size:.95em"></div>
+  <div id="gettingStarted" class="card" style="display:none;margin:0 2px 10px"></div>
   <div id="livebody">
    <div id="w_fs"><button class="b" style="margin-bottom:10px" onclick="enterFullDash()">FULL-SCREEN LIVE VIEW</button></div>
    <div id="w_speed">
@@ -453,12 +462,15 @@
      <div id="anasec" style="font-size:.95em;margin-top:4px"></div></div>
     <div class="card" style="margin-bottom:10px"><div class="l">Coach — tap 📍 to see it on the map</div>
      <div id="anacoach" style="font-size:.95em;margin-top:4px"></div></div>
-    <div class="card" style="margin-bottom:10px"><div class="l">Venue leaderboard</div>
+    <!-- leaderboard is OPT-IN here: boards live on the Tracks tab; this card
+         only appears for people who ask for it (LEADERBOARD in the actions row) -->
+    <div class="card" id="lbCard" style="margin-bottom:10px;display:none"><div class="l">Venue leaderboard</div>
      <div id="lbBody" class="muted" style="font-size:.95em;margin-top:4px">tap REFRESH to load</div>
      <div class="segrow" style="margin-top:8px">
       <button class="minib" onclick="lbRefresh()">REFRESH</button>
       <button class="minib" style="background:var(--best);color:#1A1A1A"
        onclick="lbSubmit()">SUBMIT MY BEST</button>
+      <button class="minib" onclick="lbHideInSession()">HIDE</button>
      </div>
     </div>
     <div class="card" style="margin-bottom:10px"><div class="l">Acceleration (best in this run)</div>
@@ -1005,6 +1017,104 @@ function selectTrack(id){
  const sg=startGate();
  if(map && sg) map.setView([sg.la,sg.lo],DEFAULT_ZOOM);
 }
+// ---------------- first run: the app tells you what to do ----------------
+// A self-checking list on the Live tab. Each step ticks itself off as real
+// state appears; the whole card vanishes forever once everything's done (or
+// it's dismissed). No wizard-prison — every step names the button to press.
+let _gsCache=null;
+function renderGettingStarted(){
+ const el=document.getElementById("gettingStarted"); if(!el) return;
+ const c1=!!(rxChar||demo||pg.watch!=null||settings.lastLogger);
+ const c2=!!settings.driverName;
+ const c3=db.tracks.some(t=>(t.gates||[]).length);
+ if(settings.gsDone || (c1&&c2&&c3)){
+  if(c1&&c2&&c3 && !settings.gsDone){ settings.gsDone=true; saveSettings(); }
+  el.style.display="none"; _gsCache=null; return;
+ }
+ const key=""+c1+c2+c3;
+ if(key===_gsCache) return;   // render() runs at 10 Hz — only touch DOM on change
+ _gsCache=key;
+ const tick=ok=>ok?`<span style="color:var(--best);font-weight:700">✓</span>`
+                  :`<span style="color:var(--muted)">○</span>`;
+ el.style.display="block";
+ el.innerHTML=`<div class="l">Getting started
+   <button class="minib" style="float:right" onclick="settings.gsDone=true;saveSettings();renderGettingStarted()">✕</button></div>
+  <div style="margin-top:6px;line-height:1.6;font-size:.95em">
+   <div>${tick(c1)} <b>Connect your logger</b> — tap CONNECT above and pick your unit.
+    <span class="muted">No logger with you? Try DEMO, or MENU → PHONE GPS.</span></div>
+   <div>${tick(c2)} <b>Your name</b> — on your shared laps and boards.
+    ${c2?"":`<button class="minib" onclick="setDriverName();renderGettingStarted()">SET</button>`}</div>
+   <div>${tick(c3)} <b>Your track</b> — open a track link from a friend, or when you
+    arrive somewhere new the app offers a 60-second setup right here.
+    <span class="muted">(Prefer the map? Map tab → NEW TRACK.)</span></div>
+   <div style="margin-top:4px" class="muted">Then just drive — cross your start line
+    at speed and the session starts itself.</div>
+  </div>`;
+}
+// ---------------- 60-second venue setup ----------------
+// The customer-shaped path: no map tapping, no jargon. One question (circuit
+// vs point-to-point), then "park ON the line, nose forward, tap SET" — the
+// line is placed at the GPS position, perpendicular to the car's heading.
+// Offered automatically when driving somewhere with no saved track nearby.
+let nv={mode:null};
+function nvOffer(show){
+ const el=document.getElementById("nvOffer"); if(!el) return;
+ el.style.display=(show && !settings.nvDismissed)?"block":"none";
+}
+function nvStart(){
+ document.getElementById("sheettrack").textContent="New venue — 60 seconds";
+ document.getElementById("sheetbtns").innerHTML=`
+  <div class="muted" style="margin-bottom:8px;text-align:center">How does this place work?</div>
+  <button class="b" onclick="nvMode('loop')">CIRCUIT — same line every lap</button>
+  <button class="b" onclick="nvMode('stage')">POINT-TO-POINT — start here, finish there</button>`;
+ sheetUp();
+}
+function nvMode(m){
+ nv.mode=m;
+ const id=Date.now();
+ db.tracks.push({id, name:"New venue "+new Date().toLocaleDateString([],{month:"short",day:"numeric"}),
+  mode:m, gates:[]});
+ db.active=id;
+ saveDb(); refreshTrackSel(); renderSplitsRow();
+ nvAskLine(m==="loop"?"startfinish":"start");
+}
+function nvAskLine(role){
+ const what=role==="finish"?"finish":"start";
+ document.getElementById("sheettrack").textContent="Set the "+what+" line";
+ document.getElementById("sheetbtns").innerHTML=`
+  <div class="muted" style="margin-bottom:8px;text-align:center">${role==="finish"
+   ?"Now drive to the FINISH, park on it nose-forward, and tap."
+   :"Park ON the "+what+" line, nose pointing the way you'll drive, and tap."}</div>
+  <button class="b" style="background:var(--best);color:#1A1A1A" onclick="nvSetLine('${role}')">📍 SET ${what.toUpperCase()} LINE HERE</button>
+  <div class="muted" id="nvmsg" style="text-align:center;min-height:1.2em"></div>`;
+ sheetUp();
+}
+function nvSetLine(role){
+ if(!(st.f>=3 && st.la)){
+  const m=document.getElementById("nvmsg");
+  if(m) m.textContent="Waiting for GPS — give it a few seconds and tap again.";
+  return;
+ }
+ const t=tr();
+ t.gates=(t.gates||[]).filter(g=>g.role!==role);
+ t.gates.push({id:"g"+Date.now(), role,
+  name:role==="startfinish"?"S/F":role==="start"?"START":"FINISH",
+  code:role==="startfinish"?"SF":role==="start"?"ST":"FI",
+  la:st.la, lo:st.lo,
+  heading:(((st.hd||0)+90)%360),        // line ACROSS the direction of travel
+  width:GATE_DEFAULT_WIDTH});
+ saveDb(); redrawMarks(); renderSplitsRow(); syncGate();
+ if(nv.mode==="stage" && role==="start"){ nvAskLine("finish"); return; }
+ document.getElementById("sheettrack").textContent="You're set";
+ document.getElementById("sheetbtns").innerHTML=`
+  <div style="margin-bottom:8px;text-align:center">Timing is armed — cross the
+   ${nv.mode==="stage"?"start line":"line"} at speed and the session starts itself.</div>
+  <div class="muted" style="margin-bottom:8px;text-align:center">After you've driven,
+   the app can place sector lines for you (Map tab → ✨ AUTO-PLACE SPLITS).
+   Rename the venue on the Map tab whenever.</div>
+  <button class="b" onclick="hideSheet()">GO DRIVE</button>`;
+ nvOffer(false);
+}
 function newTrack(){
  const name=prompt("Track name?","Track "+(db.tracks.length+1));
  if(!name) return;
@@ -1057,6 +1167,9 @@ function startSession(){
    startedAt:Date.now(), endedAt:null, attempts:[], track:[],
    logger:(bleDev&&bleDev.name)||null};   // which physical unit recorded this
  db.sessions.push(s); db.activeSessionId=s.id;
+ requestWakeLock();   // a session means racing means the screen must stay alive
+ conStatus("Leave the screen ON during runs — Android cuts Bluetooth when it sleeps. "
+  +"(The logger records everything regardless; missed laps are pulled back automatically.)", true);
  // arming: wipe any stale split/lap state so lap 1 starts clean, then push the
  // gate so the device (loop mode) begins timing on the next start-line crossing
  splitTimes={}; nextSplitIdx=0;
@@ -1440,13 +1553,19 @@ function openSessionView(sessId){
    +"distance: phases and zones are meaningful, lap/sector times are "
    +"approximate (~±1–2%). The runs table (timed on the logger) stays exact.";
  }
- // be upfront when the 25/50 Hz stream never made it into this session
+ // the phone's trail is a FALLBACK — if the logger is reachable and knows this
+ // session's .BIN, pull the real recording automatically instead of asking the
+ // user to find a button (weekend field report: the button was never found)
  const hint=document.getElementById("svHint");
- if(hint) hint.innerHTML = hires ? "" :
+ const canFetch=!s.imported && rxChar && (s.logFile||(s.logFiles&&s.logFiles.length));
+ if(!hires && canFetch && !s._autoFetched){
+  s._autoFetched=true;   // once per app load — a failed pull can be retried via the button
+  if(hint) hint.innerHTML="Pulling the logger's full recording automatically — every lap it saw will appear…";
+  setTimeout(()=>{ try{ fetchHighRes(); }catch(_){} }, 500);
+ } else if(hint) hint.innerHTML = hires ? "" :
   (s.logFile
-   ? "Showing the phone's ~10 Hz trail — no 25/50 Hz stream was captured for this session. "
-    +"Tap <b>FETCH FULL-RATE TELEMETRY</b> below to pull the logger's .BIN "
-    +"(the logger needs the streaming firmware flashed for live hi-res)."
+   ? "Showing the phone's ~10 Hz trail. Connect to the logger and reopen this session "
+    +"to pull the full recording automatically (or tap FETCH FULL-RATE TELEMETRY below)."
    : "Showing the phone's ~10 Hz trail — no 25/50 Hz stream was captured "
     +"(logger not on the streaming firmware, or recorded/shared before it).");
  const pts=src.filter(p=>p.la&&p.lo).map(p=>({
@@ -1476,6 +1595,9 @@ function renderSvRuns(s, unified){
  const live=s.id===db.activeSessionId, n=s.attempts.length;
  const best=n?Math.min(...s.attempts.map(a=>a.time)):null;
  const nSec=unified?unified.nSec:0;
+ const extra=(unified&&unified.extra)||[];   // laps the phone MISSED (screen off)
+                                             // but the logger recorded — first-class rows
+ const bestAll=Math.min(best??Infinity, ...extra.map(l=>l.time));
  let rows;
  if(n){
   const thr=outThreshold(s.attempts.map(a=>a.time));
@@ -1485,31 +1607,42 @@ function renderSvRuns(s, unified){
    const sec=unified?unified.sec[i]:null;
    const secCells=Array.from({length:nSec},(_,j)=>
     `<td>${(sec&&sec[j]!=null)?sec[j].toFixed(2):"–"}</td>`).join("");
-   return `<tr class="${a.time===best?'best':''}" style="${out?'opacity:.45':''}"><td>${a.n}</td><td>${fmt(a.time)}</td>`
-   +`<td>${out?'OUT':(a.time===best?'BEST':'+'+(a.time-best).toFixed(2))}</td>`
+   return `<tr class="${a.time===bestAll?'best':''}" style="${out?'opacity:.45':''}"><td>${a.n}</td><td>${fmt(a.time)}</td>`
+   +`<td>${out?'OUT':(a.time===bestAll?'BEST':'+'+(a.time-bestAll).toFixed(2))}</td>`
    +secCells
    +`<td><button class="minib" onclick="viewAttemptReplay('${s.id}',${i})">MAP</button> `
    +`<button class="minib bad" onclick="deleteAttempt('${s.id}',${i})">🗑</button></td></tr>`;
   }).reverse().join("");
  } else {
-  rows=`<tr><td colspan="${4+nSec}" class="muted" style="text-align:left">`
+  rows=extra.length?"":`<tr><td colspan="${4+nSec}" class="muted" style="text-align:left">`
    +`No completed ${word}s in this session`+(live?" yet — timing is armed and waiting.":".")+`</td></tr>`;
  }
+ rows+=extra.map(l=>{
+  const secCells=Array.from({length:nSec},(_,j)=>
+   `<td>${l.sec[j]!=null?l.sec[j].toFixed(2):"–"}</td>`).join("");
+  return `<tr class="${l.time===bestAll?'best':''}"><td>◦</td><td>${fmt(l.time)}</td>`
+  +`<td>${l.time===bestAll?'BEST':'+'+(l.time-bestAll).toFixed(2)}</td>`
+  +secCells
+  +`<td><button class="minib" onclick="coachJump(${l.a.toFixed(2)})">MAP</button></td></tr>`;
+ }).join("");
  el.innerHTML=`
   <div class="muted" style="padding:8px 2px 4px;font-size:.78em;text-transform:uppercase;letter-spacing:.04em">
    ${Word}s ${vintageBadge(s)} ${live?'<span class="badge live">LIVE</span>':''} · tap MAP to see one</div>
-  <table style="margin-bottom:${nSec?"2px":"10px"}"><thead>
+  <table style="margin-bottom:${(nSec||extra.length)?"2px":"10px"}"><thead>
    <tr><th>${Word}</th><th>Time</th><th>Delta</th>${Array.from({length:nSec},(_,j)=>`<th>S${j+1}</th>`).join("")}<th></th></tr></thead>
    <tbody>${rows}</tbody></table>`
-  +(nSec?`<div class="muted" style="font-size:.75em;margin-bottom:10px">times = at the line ·
+  +((nSec||extra.length)?`<div class="muted" style="font-size:.75em;margin-bottom:10px">${extra.length?`◦ = ${extra.length} ${word}${extra.length===1?"":"s"} the phone missed, recovered from the logger's recording · `:""}times ${extra.length?"with a number":""} = at the line ·
     sectors = recomputed from the recording (±0.1–0.2 s${sessionVintage(s)==="approx"?", ±1–2% on ≈CLOCK data":""})</div>`:"");
 }
-// pair recomputed laps to line-timed attempts and merge sectors into the one table
+// pair recomputed laps to line-timed attempts; sectors merge into their rows,
+// and UNMATCHED laps (phone asleep, logger still recording) join the table as
+// their own rows instead of vanishing (weekend field report: 8 of 10 laps
+// existed only in the recording and were invisible)
 function unifyLapsTable(laps){
  const s=anaSessionId?db.sessions.find(x=>x.id===anaSessionId):null;
  const head=document.getElementById("anahead");
  const tbl=head?head.closest("table"):null;
- if(!s || !s.attempts.length){ if(tbl) tbl.style.display=""; return; }
+ if(!s){ if(tbl) tbl.style.display=""; return; }
  const nSec=Math.max(...laps.map(l=>l.sec.length));
  const tol=sessionVintage(s)==="approx"?4:2.5;   // rebuilt clocks pair looser
  const pool=laps.map(l=>({l,used:false}));
@@ -1523,10 +1656,11 @@ function unifyLapsTable(laps){
   if(bestP){ bestP.used=true; return bestP.l.sec; }
   return null;
  });
- if(nSec>0 && secByAttempt.some(Boolean)){
+ const extra=pool.filter(p=>!p.used && !p.l.out).map(p=>p.l);
+ if((nSec>0 && secByAttempt.some(Boolean)) || extra.length){
   if(tbl) tbl.style.display="none";           // the merged table replaces it
-  renderSvRuns(s,{sec:secByAttempt, nSec});
- } else if(tbl) tbl.style.display="";          // no sectors/pairs — keep the raw table
+  renderSvRuns(s,{sec:secByAttempt, nSec, extra});
+ } else if(tbl) tbl.style.display="";          // nothing to merge — keep the raw table
 }
 // ---------------- head-to-head: any two sessions, no re-import ----------------
 // Compute a session's laps headlessly (same pipeline as the session view but
@@ -1701,8 +1835,14 @@ function venueKeyFor(s, best){
  return venueKeyRaw(t, lapLen);
 }
 function lbHtml(top,count){
- return (top.length?top.map((e,i)=>
-   `<div style="display:flex;gap:8px;align-items:center;padding:2px 0">
+ // the hook: YOUR position and the gap to P1, not just a list
+ const me=(settings.driverName||"").toLowerCase();
+ const myI=me?top.findIndex(e=>(e.driver||"").toLowerCase()===me):-1;
+ const rank=myI<0?"":(myI===0
+  ?`<div style="font-weight:700;margin-bottom:4px">You're P1 — top of the board</div>`
+  :`<div style="font-weight:700;margin-bottom:4px">You're P${myI+1} — ${(top[myI].time-top[0].time).toFixed(2)}s off P1</div>`);
+ return rank+(top.length?top.map((e,i)=>
+   `<div style="display:flex;gap:8px;align-items:center;padding:2px 0${i===myI?";background:rgba(0,66,37,.14);border-radius:3px;font-weight:700":""}">
      <span style="width:1.8em;font-weight:700">${i+1}.</span>
      <span style="flex:1;overflow:hidden;text-overflow:ellipsis">${e.driver}</span>
      <span style="font-variant-numeric:tabular-nums;font-weight:700">${fmt(e.time)}</span>
@@ -1876,7 +2016,23 @@ function renderSvActions(s){
   <button class="b" style="background:var(--ok);color:#F9F9F9;font-size:1em" onclick="uploadSession('${s.id}')">SHARE LINK</button>
   <button class="b" style="font-size:.95em" onclick="shareSession('${s.id}')">SHARE AS FILE (OFFLINE)</button>
   <button class="b" style="font-size:.95em" onclick="exportSessionCsv('${s.id}')">EXPORT LAP TIMES (CSV)</button>
+  <button class="b" style="font-size:.95em" onclick="lbShowInSession()">VENUE LEADERBOARD</button>
   <button class="b" style="font-size:.95em;color:var(--bad)" onclick="deleteSession('${s.id}')">DELETE SESSION</button>`;
+ // leaderboards are opt-in inside the session view (boards live on the Tracks
+ // tab) — only people who asked keep the card here
+ const lc=document.getElementById("lbCard");
+ if(lc) lc.style.display=settings.lbInSession?"block":"none";
+}
+function lbShowInSession(){
+ settings.lbInSession=true; saveSettings();
+ const lc=document.getElementById("lbCard");
+ if(lc){ lc.style.display="block"; lc.scrollIntoView({behavior:"smooth",block:"center"}); }
+ lbRefresh();
+}
+function lbHideInSession(){
+ settings.lbInSession=false; saveSettings();
+ const lc=document.getElementById("lbCard");
+ if(lc) lc.style.display="none";
 }
 function deleteAttempt(sessId, idx){
  const s=db.sessions.find(x=>x.id===sessId); if(!s) return;
@@ -2516,8 +2672,9 @@ function autoPickTrack(){
   const d=distM(st.la,st.lo,sg.la,sg.lo);
   if(d<bestD){ bestD=d; bestT=t; }
  }
- if(bestT && bestT.id!==db.active) selectTrack(bestT.id);
- else syncGate();
+ if(bestT){
+  if(bestT.id!==db.active) selectTrack(bestT.id); else syncGate();
+ } else nvOffer(true);   // nowhere saved is near — offer the 60-second setup
 }
 function syncGate(){
  // The device lap timer is only ARMED while a timing session is running — that
@@ -2544,10 +2701,13 @@ async function requestWakeLock(){
 }
 function releaseWakeLock(){ if(wakeLock){ wakeLock.release().catch(()=>{}); wakeLock=null; } }
 document.addEventListener("visibilitychange", ()=>{
- // the lock is auto-released whenever the tab is hidden; grab it back once
- // you return, as long as you're still actually connected
- if(document.visibilityState==="visible" && (rxChar||demo)){
-  requestWakeLock();
+ if(document.visibilityState!=="visible") return;
+ // re-grab the screen lock whenever there's a reason to hold it — including
+ // MID-SESSION WHILE DISCONNECTED (the old code only did this when the link
+ // survived, so a dead link also meant a sleepy screen: the death spiral
+ // behind "2 of 10 laps captured" at the weekend)
+ if(rxChar||demo||activeSession()) requestWakeLock();
+ if(rxChar||demo){
   // while the screen was off, packets queued and would otherwise "fast-forward"
   // the map on wake. Re-baseline the outlier filter and snap straight to the
   // current position instead of animating through the backlog.
@@ -2556,15 +2716,12 @@ document.addEventListener("visibilitychange", ()=>{
   // Chrome dropped BLE notifications while the screen was off — the logger's
   // flash still has those records, so ask it to re-stream the gap
   requestBackfill();
-  // and if the link itself died while the screen was off, get back on it
-  // without waiting for a tap (field report: no auto-reconnect after wake)
-  if(!rxChar && !demo && bleDev){
-   conStatus("Reconnecting…");
-   wireUpDevice(bleDev).then(()=>conStatus("")).catch(()=>{
-    conStatus("Logger not reachable — watching for it…");
-    watchForDevice(bleDev);
-   });
-  }
+ } else if(bleDev){
+  // link died while the screen was off (the old version never reached this —
+  // it was nested inside the "still connected" branch, i.e. dead code)
+  conStatus("Reconnecting…");
+  wireUpDevice(bleDev).then(()=>{ conStatus(""); requestBackfill(); })
+   .catch(()=>conStatus("Logger not reachable — retrying…"));  // 6 s loop keeps at it
  }
 });
 
@@ -2941,6 +3098,15 @@ function onStatus(s){
   if(!as0.logFiles) as0.logFiles=[];
   if(!as0.logFiles.includes(s.fn)){ as0.logFiles.push(s.fn); saveDb(); }
  }
+ // a crossed start line at speed IS the intent to time — never punish a
+ // forgotten START SESSION (weekend report: friction everywhere)
+ if(!as0 && fixOK && prevFix && (s.v||0)>(settings.armSpeedMs||3)){
+  const sgA=startGate();
+  if(sgA && crossedGate(sgA)){
+   startSession();
+   conStatus("Session started itself — you crossed the start line.", true);
+  }
+ }
  if(tr().mode==="stage"){
   if(fixOK) checkStage();
  } else {
@@ -2960,6 +3126,21 @@ function onStatus(s){
  if(fixOK) prevFix=[s.la,s.lo];   // update AFTER crossing checks used it as "last position"
  render();
 }
+// paddock strip: the between-runs answer ("how was that one?") right on the
+// live tab — no History digging while your helmet's still on
+function showLastRun(t, best, word){
+ const el=document.getElementById("lastRun"); if(!el) return;
+ const isBest=best!=null && t<=best+0.001;
+ el.style.display="block";
+ el.innerHTML=`Last ${word}: <b>${fmt(t)}</b> `
+  +(isBest?`<span style="color:var(--best);font-weight:700">BEST</span>`
+          :(best!=null?`<span style="color:var(--bad)">+${(t-best).toFixed(2)}</span>`:""))
+  +` <button class="minib" onclick="openLastSession()">REVIEW</button>`;
+}
+function openLastSession(){
+ const s=activeSession()||[...db.sessions].filter(x=>!x.imported).sort((a,b)=>b.startedAt-a.startedAt)[0];
+ if(s) openSessionView(s.id);
+}
 function onLapComplete(){
  if(settings.vibrateLap) vibe([80,40,80]);
  const l0=st.l||[];
@@ -2969,6 +3150,7 @@ function onLapComplete(){
   if(t===st.b && l0.length>1) msg+=". Best lap";
   else if(st.b && t>st.b) msg+=`. plus ${(t-st.b).toFixed(1)}`;
   speak(msg);
+  showLastRun(t, st.b, "lap");
  }
  if(l0.length) recordAttempt(l0[l0.length-1], splitTimes, replaySamples);
  for(const g of splitGates())
@@ -3240,6 +3422,7 @@ function checkStage(){
   if(wasBest && stageRuns.length>1) msg+=". Best run";
   else if(stageBestRun && t>stageBestRun) msg+=`. plus ${(t-stageBestRun).toFixed(1)}`;
   speak(msg);
+  showLastRun(t, stageBestRun, "run");
  }
 }
 
@@ -3254,8 +3437,25 @@ function renderSplitsRow(){
    +`<div class="v" id="splitv-${g.id}" style="font-size:1.1em">--</div></div>`).join("")
   +`<div class="card"><div class="l">Last</div><div class="v" id="lastlap" style="font-size:1.1em">--</div></div>`;
 }
+// ONE glanceable answer to "am I ready?" — replaces reading diag numbers.
+// Green READY when everything will work; otherwise the ONE action needed.
+function updateReady(){
+ const el=document.getElementById("readyChip"); if(!el) return;
+ if(activeSession() || uiEdit){ el.style.display="none"; return; }
+ let msg, ok=false;
+ if(!rxChar && !demo && pg.watch==null){ el.style.display="none"; return; }  // CONNECT button already says it
+ else if(!(st.f>=3)) msg="Waiting for GPS — needs open sky…";
+ else if(!startGate()) msg="No start line at this venue yet — set one below or on the Map tab";
+ else { ok=true; msg="READY — cross the line at speed; the session starts itself"; }
+ el.style.display="block";
+ el.style.background=ok?"var(--best)":"var(--card2)";
+ el.style.color=ok?"#1A1A1A":"var(--fg)";
+ if(el.textContent!==msg) el.textContent=msg;
+}
 function render(){
  const $=id=>document.getElementById(id);
+ updateReady();
+ renderGettingStarted();
  const stage=tr().mode==="stage";
  document.body.classList.toggle("recording",!!st.r);
  $("dot-fix").classList.toggle("on",st.f>=3);
@@ -5275,6 +5475,7 @@ renumberSplits(); saveDb();
 refreshTrackSel();
 renderSplitsRow();
 renderSessionUI();
+renderGettingStarted();     // first-run checklist (self-hides once complete)
 applyLiveLayout();          // user's widget layout (MENU → live view layout)
 setTimeout(initMini,150);   // live dashboard (incl. minimap) shows from load now
 // opened via a share link (#s=id)? fetch the session from our backend and
