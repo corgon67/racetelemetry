@@ -1678,7 +1678,7 @@ function openSessionView(sessId){
  }
  anaMsg(`Analysing ${hires?"50 Hz":"10 Hz"} data…`);
  // older own-sessions recorded before venue memory existed: fold them in now
- if(!s.imported && !s.debrief){ try{ updateVenueMemory(s); }catch(_){} }
+ if(!s.imported && (!s.debrief || (truthIsLogger(s) && s.debrief.src!=="logger"))){ try{ updateVenueMemory(s); }catch(_){} }
  // let the overlay lay out first so the chart canvases have a real width
  setTimeout(()=>{
   try{ runAnalysis(pts, I, title); }
@@ -1700,21 +1700,28 @@ function renderSvRuns(s, unified){
  // phantom attempts (double-crosses shorter than a real lap) must not own
  // BEST — a 4.91 s ghost once made every real lap read "+105"
  const minLap=settings.minLapS||10;
- const validT=[...s.attempts.map(a=>a.time),...extra.map(l=>l.time)].filter(t=>t>=minLap);
+ // LOGGER truth: a paired attempt DISPLAYS the time recomputed from the
+ // logger's recording; the live number is only what the phone saw on the day
+ const loggerTruth=truthIsLogger(s) && unified && unified.laps;
+ const shown=s.attempts.map((a,i)=>(loggerTruth && unified.laps[i])?unified.laps[i].time:a.time);
+ // under LOGGER truth an attempt the recording can't confirm (crossing not in
+ // the log, e.g. session ended mid-lap or a phantom) never owns BEST
+ const unconfirmed=i=>loggerTruth && !unified.laps[i];
+ const validT=[...shown.filter((t,i)=>!unconfirmed(i)),...extra.map(l=>l.time)].filter(t=>t>=minLap);
  const bestAll=validT.length?Math.min(...validT):null;
  let rows;
  if(n){
-  const thr=outThreshold(s.attempts.map(a=>a.time));
-  const isOut=a=>a.time>thr && a.time!==bestAll;
+  const thr=outThreshold(shown);
   rows=s.attempts.map((a,i)=>{
-   const short=a.time<minLap, out=!short&&isOut(a);
+   const t=shown[i], short=t<minLap, unc=unconfirmed(i), out=!short && !unc && t>thr && t!==bestAll;
    const sec=unified?unified.sec[i]:null;
+   const lp=loggerTruth?unified.laps[i]:null;
    const secCells=Array.from({length:nSec},(_,j)=>
     `<td>${(sec&&sec[j]!=null)?sec[j].toFixed(2):"–"}</td>`).join("");
-   return `<tr class="${a.time===bestAll?'best':''}" style="${(out||short)?'opacity:.45':''}"><td>${a.n}</td><td>${fmt(a.time)}</td>`
-   +`<td>${short?'SHORT':out?'OUT':(a.time===bestAll?'BEST':'+'+(a.time-bestAll).toFixed(2))}</td>`
+   return `<tr class="${(t===bestAll&&!unc)?'best':''}" style="${(out||short||unc)?'opacity:.45':''}"><td>${a.n}</td><td>${fmt(t)}${lp&&Math.abs(lp.time-a.time)>0.05?`<span class="muted" style="font-size:.7em"> (live ${fmt(a.time)})</span>`:""}</td>`
+   +`<td>${short?'SHORT':unc?'<span title="the logger\'s recording has no matching lap">NOT IN LOG</span>':out?'OUT':(t===bestAll?'BEST':'+'+(t-bestAll).toFixed(2))}</td>`
    +secCells
-   +`<td><button class="minib" onclick="viewAttemptReplay('${s.id}',${i})">MAP</button> `
+   +`<td><button class="minib" onclick="${lp?`coachJump(${lp.a.toFixed(2)})`:`viewAttemptReplay('${s.id}',${i})`}">MAP</button> `
    +`<button class="minib bad" onclick="deleteAttempt('${s.id}',${i})">🗑</button></td></tr>`;
   }).reverse().join("");
  } else {
@@ -1735,8 +1742,11 @@ function renderSvRuns(s, unified){
   <table style="margin-bottom:${(nSec||extra.length)?"2px":"10px"}"><thead>
    <tr><th>${Word}</th><th>Time</th><th>Delta</th>${Array.from({length:nSec},(_,j)=>`<th>S${j+1}</th>`).join("")}<th></th></tr></thead>
    <tbody>${rows}</tbody></table>`
-  +((nSec||extra.length)?`<div class="muted" style="font-size:.75em;margin-bottom:10px">${extra.length?`◦ = ${extra.length} ${word}${extra.length===1?"":"s"} the phone missed live, found in ${sessionVintage(s)==="hires"?"the logger's recording":"this session's saved trail"} · `:""}times ${extra.length?"with a number":""} = at the line ·
-    sectors = recomputed (±0.1–0.2 s${sessionVintage(s)==="approx"?", ±1–2% on ≈CLOCK data":""})</div>`:"");
+  +(loggerTruth
+    ?`<div class="muted" style="font-size:.75em;margin-bottom:10px">All times and sectors from the logger's recording (line crossings interpolated at 25 Hz).${extra.length?` ◦ = ${extra.length} ${word}${extra.length===1?"":"s"} the phone never saw live.`:""}${s.attempts.length?" Small grey figures = what the phone timed live.":""}</div>`
+    :(nSec||extra.length)?`<div class="muted" style="font-size:.75em;margin-bottom:10px">${extra.length?`◦ = ${extra.length} ${word}${extra.length===1?"":"s"} the phone missed live, found in ${sessionVintage(s)==="hires"?"the logger's recording":"this session's saved trail"} · `:""}times ${extra.length?"with a number":""} = at the line ·
+    sectors = recomputed (±0.1–0.2 s${sessionVintage(s)==="approx"?", ±1–2% on ≈CLOCK data":""})</div>`
+    :(settings.truth!=="phone" && !s.imported)?`<div class="muted" style="font-size:.75em;margin-bottom:10px">Provisional — timed live by the phone. The logger's recording becomes the source of truth once it's pulled (connect and reopen).</div>`:"");
 }
 // THE MODEL (after the "delete removed my real laps!" incident):
 //   1. s.attempts[]   — live-timed entries. STORED. The only thing DELETE touches.
@@ -1765,7 +1775,7 @@ function unifyLapsTable(laps){
  // (the demo did exactly that: 3 laps/0:36.57 above, 2 laps/0:37.39 below)
  // was the single most confusing thing in the app.
  if(tbl) tbl.style.display="none";
- renderSvRuns(s,{sec:byAttempt.map(l=>l?l.sec:null), nSec, extra});
+ renderSvRuns(s,{sec:byAttempt.map(l=>l?l.sec:null), laps:byAttempt, nSec, extra});
 }
 // ---------------- head-to-head: any two sessions, no re-import ----------------
 // Compute a session's laps headlessly (same pipeline as the session view but
@@ -1819,7 +1829,17 @@ function pairLaps(s, laps){
 // the session view and the venue PB: fastest VALID line-timed attempt (phantom
 // double-crosses shorter than a lap don't count), else the fastest lap
 // recovered from the recording, else null.
+// SOURCE OF TRUTH (MENU → LOGGER / PHONE). Default LOGGER: whenever the
+// logger's full-rate recording is on the phone (streamed live or fetched),
+// EVERY number — lap times, sectors, best, PB, debrief, History card — is
+// recomputed from that recording; the phone's live timing is only a
+// provisional number until the recording arrives. PHONE keeps the old
+// behaviour: the live-timed number is the number, the recording adds sectors.
+function truthIsLogger(s){
+ return settings.truth!=="phone" && !!s && sessionVintage(s)==="hires";
+}
 function sessionBest(s){
+ if(truthIsLogger(s) && s.debrief && s.debrief.src==="logger" && s.debrief.best) return s.debrief.best;
  const minLap=settings.minLapS||10;
  const v=(s.attempts||[]).map(a=>a.time).filter(t=>t>=minLap);
  if(v.length) return Math.min.apply(null,v);
@@ -1827,6 +1847,7 @@ function sessionBest(s){
  return null;
 }
 function sessionLapCount(s){
+ if(truthIsLogger(s) && s.debrief && s.debrief.src==="logger" && s.debrief.laps) return s.debrief.laps;
  const minLap=settings.minLapS||10;
  const n=(s.attempts||[]).filter(a=>a.time>=minLap).length;
  return n || (s.debrief&&s.debrief.laps) || 0;
@@ -1882,14 +1903,17 @@ function updateVenueMemory(s){
  // phone never timed live falls back to its recomputed time.
  const {byAttempt}=pairLaps(s,res.laps);
  const minLap=settings.minLapS||10;
- let bestTime=best.time;
- const ai=byAttempt.indexOf(best);
- if(ai>=0 && s.attempts[ai].time>=minLap) bestTime=s.attempts[ai].time;
- // and never let a paired-but-slower recomputed lap hide a faster valid attempt
- const fastestAtt=sessionBest(s);
- if(fastestAtt!=null && fastestAtt<bestTime) bestTime=fastestAtt;
- const nLaps=Math.max(res.laps.filter(l=>!l.out).length, sessionLapCount(s));
- const d={sessId:s.id, at:Date.now(), best:+bestTime.toFixed(2), laps:nLaps,
+ let bestTime=best.time, nLaps=res.laps.filter(l=>!l.out).length, src="logger";
+ if(!truthIsLogger(s)){
+  // PHONE truth (or no recording yet): the line-timed attempt is the number
+  src="live";
+  const ai=byAttempt.indexOf(best);
+  if(ai>=0 && s.attempts[ai].time>=minLap) bestTime=s.attempts[ai].time;
+  const v=(s.attempts||[]).map(a=>a.time).filter(t=>t>=minLap);
+  if(v.length){ const fa=Math.min.apply(null,v); if(fa<bestTime) bestTime=fa; }
+  nLaps=Math.max(nLaps, v.length);
+ }
+ const d={sessId:s.id, at:Date.now(), best:+bestTime.toFixed(2), laps:nLaps, src,
           prevPb:v.pb?v.pb.time:null};
  // focus check BEFORE PB update (verdict is against the focus baseline)
  if(v.focus && v.corners){
@@ -4419,6 +4443,12 @@ function openSettings(){
   <div class="segrow">
    <button class="b" style="background:${seg(!!settings.keepAlive)}" onclick="toggleSetting('keepAlive');keepAliveSync()">KEEP LINK ALIVE (SCREEN OFF) ${settings.keepAlive?"ON":"OFF"}</button>
   </div>
+  <div class="l muted" style="margin:6px 0 3px">Source of truth</div>
+  <div class="segrow">
+   <button class="b" style="background:${seg(settings.truth!=="phone")}" onclick="settings.truth='logger';saveSettings();openSettings();renderHistory()">LOGGER RECORDING</button>
+   <button class="b" style="background:${seg(settings.truth==="phone")}" onclick="settings.truth='phone';saveSettings();openSettings();renderHistory()">PHONE LIVE TIMING</button>
+  </div>
+  <div class="muted" style="text-align:center;margin:-4px 0 8px;font-size:.82em">LOGGER: every lap, sector, best and PB is recomputed from the logger's 25 Hz recording once it's on the phone; live times are provisional until then. PHONE: the live-timed number stays the number and the recording only adds sectors.</div>
   <div class="muted" style="text-align:center;margin:-4px 0 8px;font-size:.82em">plays an inaudible tone so Android keeps the app — and the Bluetooth link — running with the screen off. A media notification appears; battery savers can still stop it. Laps missed while asleep are recovered from the logger either way.</div>
   <div class="muted" style="text-align:center;margin-bottom:8px">
    voice coach speaks lap/run times &amp; split deltas · auto-connect re-links the
@@ -5413,7 +5443,10 @@ function analyzeBuffer(buf, fname){
   const s=db.sessions.find(x=>x.id===anaSessionId);
   if(s && !s.hasHires){
    s.hasHires=saveHires(s.id, decimateSamples(samples, 20000));
-   s._vint=null; saveDb();
+   s._vint=null;
+   // the recording is now the truth for this session — re-fold PB/debrief from it
+   if(s.hasHires && !s.imported){ s.debrief=null; try{ updateVenueMemory(s); }catch(_){} }
+   saveDb(); renderHistory();
   }
  }
  const hint=document.getElementById("svHint");
