@@ -13,10 +13,17 @@
 <html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
 <title>RaceLogger</title>
-<link rel="stylesheet"
- href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
-<script
- src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#1A1A1A">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<!-- Leaflet is served from this site (vendor/) and cached by sw.js, so the app
+     opens with working maps at a venue with no signal. The CDN is only a
+     fallback if the local copy is missing (e.g. vendor/ not uploaded). -->
+<link rel="stylesheet" href="vendor/leaflet.css"
+ onerror="this.onerror=null;this.href='https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css'">
+<script src="vendor/leaflet.js"
+ onerror="var s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js';document.head.appendChild(s)"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&display=swap">
@@ -51,10 +58,20 @@
         background:var(--hdr,#1A1A1A);
         border-bottom:4px solid var(--stripe,#CC0000)}
  header h1{font-family:Anton,"Arial Narrow",sans-serif;font-weight:400;font-size:1.15em;
-        color:#F4F1EA;margin:0;flex:1;letter-spacing:.1em}
+        color:#F4F1EA;margin:0;flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;
+        white-space:nowrap;letter-spacing:.08em}
+ header .dot, header #mode, header button{flex-shrink:0}
  #settingsBtn{background:none;border:2px solid #F4F1EA;border-radius:2px;color:#F4F1EA;
-        font-size:1.15em;padding:2px 8px}
+        font-size:1.15em;padding:2px 8px;min-height:40px}
+ #videoBtn{min-height:40px;min-width:40px}
  header .muted{color:#A39B8B}
+ #trackname{flex:1 6 auto;min-width:48px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:.85em}
+ #mode{white-space:nowrap;font-size:.85em}
+ /* driver screen while a session runs */
+ body.insession #gettingStarted, body.insession #nvOffer{display:none!important}
+ body.insession #w_fs{order:98!important}
+ body.insession #w_obd{order:99!important}
+ body.insession #w_status{order:100!important}
  .dot{width:10px;height:10px;border-radius:50%;background:var(--dotoff)}
  .dot.on{background:#4c4}.dot.rec{background:#e33;animation:pulse 1s infinite}
  @keyframes pulse{50%{opacity:.4}}
@@ -79,7 +96,7 @@
  #map{position:absolute;inset:0;background:var(--card2)}
  .mapfab{position:absolute;z-index:400;background:rgba(26,26,26,.85);color:#F4F1EA;
         border:2px solid #000;border-radius:2px;padding:10px 12px;font-weight:700;
-        font-size:.85em}
+        font-size:.85em;min-height:42px}
  .mapfab.on{background:var(--accent);color:var(--accent-ink)}
  body.light .mapfab{background:rgba(244,241,234,.92);color:#2C2C2C;border-color:#1A1A1A}
  body.light .mapfab.on{background:var(--accent);color:var(--accent-ink)}
@@ -215,7 +232,7 @@
  .badge.live{background:#CC0000;color:#F9F9F9;animation:pulse 1.4s infinite}
  .histempty{color:var(--muted);text-align:center;padding:40px 20px;font-size:.95em}
  .minib{background:var(--card2);color:var(--fg);border:2px solid var(--ink);border-radius:2px;
-   padding:4px 10px;font-weight:700}
+   padding:4px 10px;font-weight:700;min-height:38px}
  .minib:active{transform:translate(1px,1px)}
  .minib.bad{color:var(--bad)}
 
@@ -346,7 +363,7 @@
    </div>
    <div id="splits"></div>
    <div id="w_session">
-    <button class="b" id="sessBtn" onclick="toggleSession()">START SESSION</button>
+    <button class="b" id="sessBtn" onclick="toggleSession()">▶  START SESSION</button>
     <div class="card" id="sessState" style="margin-bottom:10px;text-align:center">
      <div id="sessStateBig" style="font-size:1.05em;font-weight:800;letter-spacing:.04em">&nbsp;</div>
      <div id="sessInfo" class="muted" style="margin-top:2px">Tap START SESSION when you get to the venue — the logger is already recording.</div></div>
@@ -372,7 +389,7 @@
     <option value="stage">STAGE</option>
    </select>
    <button onclick="newTrack()">NEW</button>
-   <button onclick="renameTrack()">EDIT</button>
+   <button onclick="renameTrack()">RENAME</button>
    <button onclick="deleteTrack()">DEL</button>
   </div>
   <div id="mapwrap">
@@ -507,8 +524,7 @@
  </div>
 </div>
 <div class="sheet" id="sheet">
- <div class="l muted" style="margin-bottom:8px">Place mark on
-  <span id="sheettrack"></span></div>
+ <div class="l muted" style="margin-bottom:8px"><span id="sheetpre"></span><span id="sheettrack"></span></div>
  <div id="sheetbtns"></div>
  <button class="b" style="background:#666" onclick="hideSheet()">BACK</button>
 </div>
@@ -619,6 +635,20 @@ let settings=Object.assign({theme:"light", imperial:false, gateWidthDefault:16,
  minLapS:10, armSpeedMs:3, vibrateLap:true, vibrateDelta:true, voice:true,
  autoConnect:true, accelBrackets:[[0,27.78],[16.667,27.78]], lapCooldown:0},
  JSON.parse(localStorage.getItem("rl_settings")||"null")||{});
+// HTML-escape anything that came from outside this phone before it goes into
+// innerHTML: track/venue names, driver names, gate names, logger file names.
+// A shared link used to be able to run script in every phone that opened it.
+function esc(v){
+ return String(v==null?"":v).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+// per-install secret: proves to the backend that a leaderboard entry / shared
+// session is ours (so only we can beat our own time or revoke our own link).
+// Never shown, never shared.
+if(!settings.installToken){
+ const a=new Uint8Array(16); crypto.getRandomValues(a);
+ settings.installToken=Array.from(a,b=>b.toString(16).padStart(2,"0")).join("");
+ localStorage.setItem("rl_settings",JSON.stringify(settings));
+}
 // ---- voice coach: lap/run/split times spoken aloud (Web Speech API).
 // Route phone audio to the car stereo or an earbud and you never need to
 // look at the screen mid-run.
@@ -809,24 +839,52 @@ function gateEndpoints(g){
 }
 function segCross(ax,ay,bx,by,cx,cy,dx,dy){
  // does segment AB (the car's last move) cross segment CD (the gate line)?
+ return segCrossU(ax,ay,bx,by,cx,cy,dx,dy)>=0;
+}
+// same test, but returns WHERE along AB the crossing happened (0..1) or -1 —
+// the fraction turns a 100 ms status tick into a ~10 ms crossing time
+function segCrossU(ax,ay,bx,by,cx,cy,dx,dy){
  const rx=bx-ax, ry=by-ay, sx=dx-cx, sy=dy-cy;
  const denom=rx*sy-ry*sx;
- if(Math.abs(denom)<1e-12) return false;
+ if(Math.abs(denom)<1e-12) return -1;
  const qx=cx-ax, qy=cy-ay;
  const u=(qx*sy-qy*sx)/denom, v=(qx*ry-qy*rx)/denom;
- return u>=0&&u<1&&v>=0&&v<=1;
+ return (u>=0&&u<1&&v>=0&&v<=1)?u:-1;
 }
-function crossedGate(g){
+function crossedGate(g){ return crossedGateU(g)>=0; }
+function crossedGateU(g){
  // real line-crossing test between the previous and current live fix,
  // instead of a circular-distance threshold — matches the same
  // segment-intersection approach the offline analysis uses.
- if(!prevFix || st.f<3 || !st.la) return false;
+ if(!prevFix || st.f<3 || !st.la) return -1;
  const [p1,p2]=gateEndpoints(g);
  const [ax,ay]=llToXY0(g.la,g.lo,prevFix[0],prevFix[1]);
  const [bx,by]=llToXY0(g.la,g.lo,st.la,st.lo);
  const [cx,cy]=llToXY0(g.la,g.lo,p1[0],p1[1]);
  const [dx,dy]=llToXY0(g.la,g.lo,p2[0],p2[1]);
- return segCross(ax,ay,bx,by,cx,cy,dx,dy);
+ const u=segCrossU(ax,ay,bx,by,cx,cy,dx,dy);
+ if(u<0) return -1;
+ // directed gate: the move must go the way the gate is driven. A gate that
+ // hasn't learned its direction learns it from the first crossing AT SPEED
+ // during a session (or the crossing that auto-starts one) — that crossing is
+ // the driver's intent; paddock returns after that are ignored for good.
+ const mx=bx-ax, my=by-ay;
+ const dv=gateDirVec(g);
+ if(dv){ if(mx*dv[0]+my*dv[1]<=0) return -1; }
+ else if((st.v||0)>(settings.armSpeedMs||3) && (activeSession()||g.role==="startfinish"||g.role==="start")){
+  g.dir=Math.round((Math.atan2(mx,my)*180/Math.PI+360)%360);
+  saveDb();
+ }
+ return u;
+}
+// the live clock for phone-side timing: the LOGGER's millis when it sends one
+// (immune to Android delivering BLE packets in bursts), else the phone's
+function stNow(){ return (st && st.ms!=null)?st.ms:performance.now(); }
+// exact time (in stNow units) at which the car crossed gate g on this tick
+function crossTimeAt(u){
+ if(prevFixT==null) return stNow();
+ const now=stNow();
+ return prevFixT+Math.max(0,Math.min(1,u))*(now-prevFixT);
 }
 let db=(()=>{
  let d=null;
@@ -856,7 +914,8 @@ let trailDrawnM=0, trailDrawnMini=0, trailShifts=0;   // incremental trail drawi
 let outlineLine=null, outlineLineMini=null;          // saved walked track shape
 let walking=false, walkBuf=[], walkLine=null;        // live walk-capture recording
 let autoPicked=false;
-let prevFix=null;   // last live [la,lo], used for real gate line-crossing tests
+let lastMovingHd=null;   // last GPS heading seen above walking pace
+let prevFix=null, prevFixT=null;   // last live [la,lo] (+ its stNow() time), for gate line-crossing tests
 let lastGoodLa=null, lastGoodLo=null, lastGoodT=0;   // GPS outlier rejection baseline
 // Reject GPS "teleport" glitches and poor-accuracy fixes so a bad fix can't
 // corrupt the trail, skip/fake a gate crossing, or make the map jump. A large
@@ -864,8 +923,10 @@ let lastGoodLa=null, lastGoodLo=null, lastGoodT=0;   // GPS outlier rejection ba
 // and a run of rejects re-baselines so we never get stuck.
 function acceptFix(la, lo, v){
  if(st.ha!=null && st.ha>25) return false;            // >25 m reported error = junk
- const now=performance.now();
- if(lastGoodLa===null){ lastGoodLa=la; lastGoodLo=lo; lastGoodT=now; return true; }
+ // logger clock: after a screen-off burst, packet-arrival time made a real
+ // crossing look like a teleport and rejected it until re-baseline
+ const now=stNow();
+ if(lastGoodLa===null || now<lastGoodT-1000){ lastGoodLa=la; lastGoodLo=lo; lastGoodT=now; return true; }
  const dt=Math.max(0.05,(now-lastGoodT)/1000);
  const jump=distM(lastGoodLa,lastGoodLo,la,lo);
  const limit=Math.max(v||0,3)*dt*4 + 25;              // 4x the movement speed implies, + 25 m
@@ -935,21 +996,36 @@ function saveHires(id,arr){
  }
  storagePruned=true; return false;
 }
-function saveDb(){
+// saveDb() is called on every lap, every gate drag and every status tick that
+// learns a file name. Serialising the whole DB (every session's trail) on the
+// main thread exactly as the car crosses the line is the wrong moment — so
+// writes coalesce for 400 ms and flush on hide/unload. Pass true to flush now.
+let _saveTimer=null;
+function saveDb(now){
  document.getElementById("trackname").textContent=tr().name;
- if(lsSet("rl_tracks",JSON.stringify(db))) return;
+ if(now===true){ if(_saveTimer){ clearTimeout(_saveTimer); _saveTimer=null; } saveDbNow(); return; }
+ if(_saveTimer) return;
+ _saveTimer=setTimeout(()=>{ _saveTimer=null; saveDbNow(); },400);
+}
+window.addEventListener("pagehide",()=>saveDb(true));
+document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="hidden") saveDb(true); });
+// per-load scratch (_vint, _autoFetched, …) never hits storage — a stale
+// cached vintage badge outlived the data it described
+const dbJson=()=>JSON.stringify(db,(k,v)=>(typeof k==="string"&&k[0]==="_")?undefined:v);
+function saveDbNow(){
+ if(lsSet("rl_tracks",dbJson())) return;
  const old=()=>[...db.sessions].sort((a,b)=>a.startedAt-b.startedAt);
  // 1) drop stored hi-res of oldest sessions
  for(const s of old()) if(s.hasHires){ removeHires(s.id); s.hasHires=false; storagePruned=true;
-  if(lsSet("rl_tracks",JSON.stringify(db))) return; }
+  if(lsSet("rl_tracks",dbJson())) return; }
  // 2) drop 10 Hz trails of oldest sessions
  for(const s of old()) if(s.track&&s.track.length){ s.track=[]; storagePruned=true;
-  if(lsSet("rl_tracks",JSON.stringify(db))) return; }
+  if(lsSet("rl_tracks",dbJson())) return; }
  // 3) last resort: drop whole oldest sessions (never the active one)
  for(const s of old()){
   if(s.id===db.activeSessionId) continue;
   removeHires(s.id); db.sessions=db.sessions.filter(x=>x!==s); storagePruned=true;
-  if(lsSet("rl_tracks",JSON.stringify(db))) return;
+  if(lsSet("rl_tracks",dbJson())) return;
  }
  // even the metadata alone won't fit — nothing more we can safely shed
 }
@@ -1000,7 +1076,7 @@ document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{
 function refreshTrackSel(){
  const sel=document.getElementById("trackSel");
  sel.innerHTML=db.tracks.map(t=>
-  `<option value="${t.id}" ${t.id===db.active?"selected":""}>${t.name}</option>`
+  `<option value="${t.id}" ${t.id===db.active?"selected":""}>${esc(t.name)}</option>`
  ).join("");
  document.getElementById("trackname").textContent=tr().name;
  document.getElementById("sheettrack").textContent=tr().name;
@@ -1027,6 +1103,9 @@ function renderGettingStarted(){
  const c1=!!(rxChar||demo||pg.watch!=null||settings.lastLogger);
  const c2=!!settings.driverName;
  const c3=db.tracks.some(t=>(t.gates||[]).length);
+ // someone with a recorded session of their own has clearly started — stop
+ // showing a checklist above the speedo
+ if(!settings.gsDone && db.sessions.some(x=>!x.imported && (x.attempts||[]).length)){ settings.gsDone=true; saveSettings(); }
  if(settings.gsDone || (c1&&c2&&c3)){
   if(c1&&c2&&c3 && !settings.gsDone){ settings.gsDone=true; saveSettings(); }
   el.style.display="none"; _gsCache=null; return;
@@ -1097,11 +1176,15 @@ function nvSetLine(role){
  }
  const t=tr();
  t.gates=(t.gates||[]).filter(g=>g.role!==role);
+ // GPS heading of a PARKED car is noise — use the last heading seen while
+ // actually moving (the driver just drove up to the line nose-forward)
+ const hd=(lastMovingHd!=null?lastMovingHd:(st.hd||0));
  t.gates.push({id:"g"+Date.now(), role,
   name:role==="startfinish"?"S/F":role==="start"?"START":"FINISH",
   code:role==="startfinish"?"SF":role==="start"?"ST":"FI",
   la:st.la, lo:st.lo,
-  heading:(((st.hd||0)+90)%360),        // line ACROSS the direction of travel
+  heading:((hd+90)%360),                // line ACROSS the direction of travel
+  dir:Math.round(hd)%360,               // ...and the way it is driven
   width:GATE_DEFAULT_WIDTH});
  saveDb(); redrawMarks(); renderSplitsRow(); syncGate();
  if(nv.mode==="stage" && role==="start"){ nvAskLine("finish"); return; }
@@ -1177,7 +1260,8 @@ function startSession(){
  curSamples=[]; replaySamples=[]; sessTrack=[]; liveDelta=null; deltaIdx=0;
  hiResBuf=[]; hiResMs0=null; hiResLastMs=null; sessMs0=null; resetAccel();
  send("hires 1");   // ask the logger to stream 50 Hz telemetry for this session
- saveDb(); syncGate(); renderSessionUI();
+ saveDb(true); syncGate(); renderSessionUI();
+ keepAliveSync();
 }
 function endSession(){
  const s=activeSession(); if(!s) return;
@@ -1196,7 +1280,9 @@ function endSession(){
  // disarm the device lap timer — parking the gate far offshore means the car
  // never "crosses" it, so no laps are counted until you START TIMING again
  if(tr().mode==="loop") send("gate 0.000000,0.000000");
- saveDb(); renderSessionUI();
+ conStatus("");   // "Session started itself…" / "leave the screen on" hints are over
+ saveDb(true); renderSessionUI();
+ keepAliveSync();
  // auto-save the full session file to Downloads on every end: phone storage is
  // small and prunable, a .json in Downloads is forever (and shareable as-is).
  // MENU → AUTO-SAVE FILES toggles it off.
@@ -1239,8 +1325,12 @@ function recordAttempt(time,splits,samples){
 function renderSessionUI(){
  const btn=document.getElementById("sessBtn");
  const s=activeSession();
- if(btn){ btn.textContent=s?"END SESSION":"START SESSION";
+ if(btn){ btn.textContent=s?"■  END SESSION":"▶  START SESSION";
   btn.style.background=s?"var(--bad)":"var(--ok)"; }
+ // driver screen: while a session runs, everything that isn't speed / lap /
+ // delta / END gets out of the way (checklist, venue offer, full-screen button
+ // drops below the session button)
+ document.body.classList.toggle("insession",!!s);
  updateSessBanner();
  renderHistory();
 }
@@ -1318,6 +1408,9 @@ function sessionTrail(s){
 // reuse the exact byte offsets the file parser uses. Captured only while a
 // session is active; kept as raw records and turned into 50 Hz replay samples
 // on demand (buildHiRes).
+const HEXV=new Uint8Array(128);
+for(let i=0;i<10;i++) HEXV[48+i]=i;
+for(let i=0;i<6;i++){ HEXV[65+i]=10+i; HEXV[97+i]=10+i; }
 let hiResLastMs=null;   // newest device timestamp received — backfill starts after it
 let bfNote="";          // live backfill status shown in the status card
 let sessMs0=null;       // device-ms base for the session trail's time axis
@@ -1328,7 +1421,10 @@ function onTelemetry(hex){
  const n=hex.length>>1;
  if(n<1) return;
  const b=new Uint8Array(n);
- for(let i=0;i<n;i++) b[i]=parseInt(hex.substr(i*2,2),16);
+ for(let i=0;i<n;i++){   // char-code table: ~10× cheaper than parseInt(substr) at 20–40k bytes/s
+  const h=HEXV[hex.charCodeAt(i*2)], l=HEXV[hex.charCodeAt(i*2+1)];
+  b[i]=(h<<4)|l;
+ }
  const dv=new DataView(b.buffer);
  let p=0, liveLa=null, liveLo=null, liveFix=0, liveMs=0;
  while(p<n){
@@ -1471,12 +1567,12 @@ function renderHistoryList(){
  // YOUR sessions get the space; imports live in a collapsed section below
  const mine=sorted.filter(s=>!s.imported), shared=sorted.filter(s=>s.imported);
  const card=s=>{
-  const stage=s.mode==="stage", word=stage?"run":"lap", n=s.attempts.length;
-  const best=n?Math.min(...s.attempts.map(a=>a.time)):null;
+  const stage=s.mode==="stage", word=stage?"run":"lap", n=sessionLapCount(s);
+  const best=sessionBest(s);   // same figure as the debrief, the PB and the session view
   const d=new Date(s.startedAt), live=s.id===db.activeSessionId;
   return `<div class="sesscard" onclick="openSessionView('${s.id}')">
     <div class="meta">
-     <div class="venue">${s.trackName}
+     <div class="venue">${esc(s.trackName)}
       <span class="badge ${stage?'stage':'loop'}">${stage?'STAGE':'LOOP'}</span>
       ${vintageBadge(s)}
       ${s.imported?'<span class="badge" style="background:#2a4a6a;color:#cde">SHARED</span>':''}
@@ -1558,11 +1654,15 @@ function openSessionView(sessId){
  // user to find a button (weekend field report: the button was never found)
  const hint=document.getElementById("svHint");
  const canFetch=!s.imported && rxChar && (s.logFile||(s.logFiles&&s.logFiles.length));
- if(!hires && canFetch && !s._autoFetched){
+ // ...but never while a session is running: the pull pauses the logger's
+ // recording for a minute or two, and a run driven in that window is lost
+ if(!hires && canFetch && !s._autoFetched && !activeSession()){
   s._autoFetched=true;   // once per app load — a failed pull can be retried via the button
-  if(hint) hint.innerHTML="Pulling the logger's full recording automatically — every lap it saw will appear…";
+  if(hint) hint.innerHTML="Pulling the logger's full recording (recording pauses while it downloads, then resumes by itself)…";
   setTimeout(()=>{ try{ fetchHighRes(); }catch(_){} }, 500);
- } else if(hint) hint.innerHTML = hires ? "" :
+ } else if(hint) hint.innerHTML = hires ? "" : (canFetch && activeSession())
+  ? "Showing the phone's ~10 Hz trail. The logger's full recording is pulled automatically once this session ends."
+  :
   (s.logFile
    ? "Showing the phone's ~10 Hz trail. Connect to the logger and reopen this session "
     +"to pull the full recording automatically (or tap FETCH FULL-RATE TELEMETRY below)."
@@ -1638,6 +1738,17 @@ function renderSvRuns(s, unified){
   +((nSec||extra.length)?`<div class="muted" style="font-size:.75em;margin-bottom:10px">${extra.length?`◦ = ${extra.length} ${word}${extra.length===1?"":"s"} the phone missed live, found in ${sessionVintage(s)==="hires"?"the logger's recording":"this session's saved trail"} · `:""}times ${extra.length?"with a number":""} = at the line ·
     sectors = recomputed (±0.1–0.2 s${sessionVintage(s)==="approx"?", ±1–2% on ≈CLOCK data":""})</div>`:"");
 }
+// THE MODEL (after the "delete removed my real laps!" incident):
+//   1. s.attempts[]   — live-timed entries. STORED. The only thing DELETE touches.
+//   2. recomputed laps — derived from the recording EVERY time the view opens.
+//      Not stored, not deletable, always regenerate. They cannot be lost.
+//   3. ONE table shows both, and every re-render MUST go through the unified
+//      path (rerenderRuns) — a bare renderSvRuns(s) drops sectors + ◦ rows and
+//      LOOKS like a mass delete even though nothing was.
+function rerenderRuns(s){
+ if(anaSessionId===s.id && anaLaps && anaLapsSess===s.id) unifyLapsTable(anaLaps);
+ else renderSvRuns(s);
+}
 // pair recomputed laps to line-timed attempts; sectors merge into their rows,
 // and UNMATCHED laps (phone asleep, logger still recording) join the table as
 // their own rows instead of vanishing (weekend field report: 8 of 10 laps
@@ -1646,25 +1757,15 @@ function unifyLapsTable(laps){
  const s=anaSessionId?db.sessions.find(x=>x.id===anaSessionId):null;
  const head=document.getElementById("anahead");
  const tbl=head?head.closest("table"):null;
- if(!s){ if(tbl) tbl.style.display=""; return; }
- const nSec=Math.max(...laps.map(l=>l.sec.length));
- const tol=sessionVintage(s)==="approx"?4:2.5;   // rebuilt clocks pair looser
- const pool=laps.map(l=>({l,used:false}));
- const secByAttempt=s.attempts.map(a=>{
-  let bestP=null, bd=tol;
-  for(const p of pool){
-   if(p.used) continue;
-   const d=Math.abs(p.l.time-a.time);
-   if(d<bd){ bd=d; bestP=p; }
-  }
-  if(bestP){ bestP.used=true; return bestP.l.sec; }
-  return null;
- });
- const extra=pool.filter(p=>!p.used && !p.l.out).map(p=>p.l);
- if((nSec>0 && secByAttempt.some(Boolean)) || extra.length){
-  if(tbl) tbl.style.display="none";           // the merged table replaces it
-  renderSvRuns(s,{sec:secByAttempt, nSec, extra});
- } else if(tbl) tbl.style.display="";          // nothing to merge — keep the raw table
+ if(!s){ if(tbl) tbl.style.display=""; return; }   // raw .BIN file: no attempts to merge into
+ const nSec=laps.length?Math.max.apply(null,laps.map(l=>l.sec.length)):0;
+ const {byAttempt,extra}=pairLaps(s,laps);
+ // ALWAYS the merged table for a saved session — even with no splits and
+ // nothing unpaired. Showing the recomputed list beside the line-timed one
+ // (the demo did exactly that: 3 laps/0:36.57 above, 2 laps/0:37.39 below)
+ // was the single most confusing thing in the app.
+ if(tbl) tbl.style.display="none";
+ renderSvRuns(s,{sec:byAttempt.map(l=>l?l.sec:null), nSec, extra});
 }
 // ---------------- head-to-head: any two sessions, no re-import ----------------
 // Compute a session's laps headlessly (same pipeline as the session view but
@@ -1683,37 +1784,52 @@ function analysisLapsFor(s){
  const sg=gates.find(g=>g.role===(stage?"start":"startfinish"));
  const fg=stage?gates.find(g=>g.role==="finish"):sg;
  if(!sg || (stage&&!fg)) return {err:"no start line on its track"};
- const pts=dropJunkPoints(src).map(p=>({lat:p.la,lon:p.lo,spd:p.v||0,t:p.t||0}));
+ const pts=dropJunkPoints(src).map(p=>({lat:p.la,lon:p.lo,spd:p.v||0,t:p.t||0,ax:p.ax||0,ay:p.ay||0}));
  if(pts.length<20) return {err:"not enough GPS points"};
  project(pts);
- let laps=[];
- if(stage){
-  const armV=Math.max(1,settings.armSpeedMs||3);
-  const crS=gateCrossTimes(pts,sg,armV), crF=gateCrossTimes(pts,fg,armV);
-  let lastFinish=-1;
-  for(const cs of crS){
-   if(cs<=lastFinish) continue;
-   const cf=crF.find(x=>x>cs);
-   if(cf!==undefined){ laps.push({a:cs,b:cf,time:cf-cs,rows:pts.filter(g=>g.t>=cs&&g.t<=cf)}); lastFinish=cf; }
-  }
- }else{
-  const cr=gateCrossTimes(pts,sg,Math.max(1,settings.armSpeedMs||3));
-  const minLap=settings.minLapS||10;
-  let li=0;
-  while(li<cr.length-1){
-   const a=cr[li]; let fi=li+1;
-   while(fi<cr.length && cr[fi]-a<minLap) fi++;
-   if(fi>=cr.length) break;
-   laps.push({a, b:cr[fi], time:cr[fi]-a, rows:pts.filter(g=>g.t>=a&&g.t<=cr[fi])});
-   li=fi;
-  }
- }
+ const det=detectLaps(pts,t);   // the ONE detector — same laps the session view shows
+ const laps=det.laps;
  if(!laps.length) return {err:"no laps found (gates not crossed)"};
- laps.forEach((l,i)=>l.n=i+1);
- const thr=outThreshold(laps.map(l=>l.time));
- const real=laps.filter(l=>l.time<=thr);
+ const real=laps.filter(l=>!l.out);
  const best=(real.length?real:laps).reduce((a,b)=>a.time<b.time?a:b);
  return {laps, best, trackName:s.trackName};
+}
+// Pair recomputed laps to a session's line-timed attempts by time proximity.
+// Returns {byAttempt:[lap|null per attempt], extra:[unpaired laps]}. Used by
+// the runs table AND venue memory, so "best" means the same thing everywhere:
+// the number is the line-timed attempt whenever one exists; recomputation only
+// supplies sectors/rows, or a whole lap when the phone missed it live.
+function pairLaps(s, laps){
+ const tol=sessionVintage(s)==="approx"?4:2.5;   // rebuilt clocks pair looser
+ const pool=laps.map(l=>({l,used:false}));
+ const byAttempt=(s.attempts||[]).map(a=>{
+  let bestP=null, bd=tol;
+  for(const p of pool){
+   if(p.used) continue;
+   const d=Math.abs(p.l.time-a.time);
+   if(d<bd){ bd=d; bestP=p; }
+  }
+  if(bestP){ bestP.used=true; return bestP.l; }
+  return null;
+ });
+ const extra=pool.filter(p=>!p.used && !p.l.out).map(p=>p.l);
+ return {byAttempt, extra};
+}
+// The session's headline number, identical on the History card, the debrief,
+// the session view and the venue PB: fastest VALID line-timed attempt (phantom
+// double-crosses shorter than a lap don't count), else the fastest lap
+// recovered from the recording, else null.
+function sessionBest(s){
+ const minLap=settings.minLapS||10;
+ const v=(s.attempts||[]).map(a=>a.time).filter(t=>t>=minLap);
+ if(v.length) return Math.min.apply(null,v);
+ if(s.debrief && s.debrief.best) return s.debrief.best;
+ return null;
+}
+function sessionLapCount(s){
+ const minLap=settings.minLapS||10;
+ const n=(s.attempts||[]).filter(a=>a.time>=minLap).length;
+ return n || (s.debrief&&s.debrief.laps) || 0;
 }
 // ================= the learning loop =================
 // Venue memory (db.venues[trackId]) makes sessions at the same track talk to
@@ -1760,7 +1876,20 @@ function updateVenueMemory(s){
  if(res.err) return {err:res.err};
  const v=venueFor(s.trackId);
  const best=res.best;
- const d={sessId:s.id, at:Date.now(), best:+best.time.toFixed(2), laps:res.laps.length,
+ // THE number: if the best recomputed lap pairs with a line-timed attempt, the
+ // attempt's time is the PB (exact, and the same figure History shows). The
+ // recomputed lap still supplies the rows for corners/focus. Only a lap the
+ // phone never timed live falls back to its recomputed time.
+ const {byAttempt}=pairLaps(s,res.laps);
+ const minLap=settings.minLapS||10;
+ let bestTime=best.time;
+ const ai=byAttempt.indexOf(best);
+ if(ai>=0 && s.attempts[ai].time>=minLap) bestTime=s.attempts[ai].time;
+ // and never let a paired-but-slower recomputed lap hide a faster valid attempt
+ const fastestAtt=sessionBest(s);
+ if(fastestAtt!=null && fastestAtt<bestTime) bestTime=fastestAtt;
+ const nLaps=Math.max(res.laps.filter(l=>!l.out).length, sessionLapCount(s));
+ const d={sessId:s.id, at:Date.now(), best:+bestTime.toFixed(2), laps:nLaps,
           prevPb:v.pb?v.pb.time:null};
  // focus check BEFORE PB update (verdict is against the focus baseline)
  if(v.focus && v.corners){
@@ -1773,8 +1902,8 @@ function updateVenueMemory(s){
   }
  }
  v.lapLen=Math.round(best.rows[best.rows.length-1].d-best.rows[0].d);   // keys the leaderboard
- if(d.prevPb==null || best.time<d.prevPb-0.005){
-  v.pb={time:+best.time.toFixed(2), sessId:s.id, date:s.startedAt};
+ if(d.prevPb==null || bestTime<d.prevPb-0.005){
+  v.pb={time:+bestTime.toFixed(2), sessId:s.id, date:s.startedAt};
   (v.pbHistory=v.pbHistory||[]).push({time:v.pb.time, date:s.startedAt});
   if(v.pbHistory.length>30) v.pbHistory.shift();
   v.corners=detectCorners(best)||v.corners;   // re-learn layout from the PB lap
@@ -1848,7 +1977,7 @@ function lbHtml(top,count){
  return rank+(top.length?top.map((e,i)=>
    `<div style="display:flex;gap:8px;align-items:center;padding:2px 0${i===myI?";background:rgba(0,66,37,.14);border-radius:3px;font-weight:700":""}">
      <span style="width:1.8em;font-weight:700">${i+1}.</span>
-     <span style="flex:1;overflow:hidden;text-overflow:ellipsis">${e.driver}</span>
+     <span style="flex:1;overflow:hidden;text-overflow:ellipsis">${esc(e.driver)}</span>
      <span style="font-variant-numeric:tabular-nums;font-weight:700">${fmt(e.time)}</span>
      ${e.sid?`<button class="minib" style="font-size:.75em" onclick="lbView('${e.sid}')">VIEW</button>`:""}
     </div>`).join("")
@@ -1906,15 +2035,17 @@ async function lbSubmit(){
  if(!settings.driverName){ setDriverName(); if(!settings.driverName) return; }
  const key=venueKeyFor(s,lastCoach.best);
  if(!key){ alert("Set a start line on this track first."); return; }
- const best=lastCoach.best;
- if(!confirm(`Submit ${fmt(best.time)} as ${settings.driverName}?\n\nYour session uploads too, so others can VIEW the lap.`)) return;
+ const bestT=sessionBest(s)!=null?sessionBest(s):lastCoach.best.time;   // the one number
+ if(!confirm(`Submit ${fmt(bestT)} as ${settings.driverName}?\n\nYour session (GPS trace at the venue) uploads too, so others can VIEW the lap.`)) return;
  try{
   const r1=await fetch("/api/session",{method:"POST",
    headers:{"content-type":"application/json"}, body:bundleJsonFit(s)});
   const sid=r1.ok?(await r1.json()).id:null;
+  if(sid){ s.shareId=sid; saveDb(); }
   const r=await fetch("/api/lb",{method:"POST",
    headers:{"content-type":"application/json"},
-   body:JSON.stringify({key, driver:settings.driverName, time:+best.time.toFixed(2), sid})});
+   body:JSON.stringify({key, driver:settings.driverName, time:+bestT.toFixed(2), sid, token:settings.installToken})});
+  if(r.status===409){ alert("That driver name is already on this board from another phone. Pick a different name (MENU → DRIVER NAME)."); return; }
   if(!r.ok) throw new Error("server "+r.status);
   lbRefresh();
  }catch(e){ alert("Couldn't submit: "+(e.message||e)); }
@@ -1968,7 +2099,7 @@ function renderTracksView(){
   const trend=(v.pbHistory&&v.pbHistory.length>1)
    ? v.pbHistory.slice(-4).map(p=>fmt(p.time)).join(" → ") : null;
   return `<div class="card" style="margin-bottom:12px">
-   <div class="l">${t.name}<span id="town_${t.id}" style="font-weight:400;text-transform:none;
+   <div class="l">${esc(t.name)}<span id="town_${t.id}" style="font-weight:400;text-transform:none;
      letter-spacing:.02em;opacity:.75">${t.town?" · "+t.town:""}</span>${t.id===db.active?" · ACTIVE":""}</div>
    <div style="margin-top:6px">
     <span class="badge ${t.mode==="stage"?"stage":"loop"}">${t.mode==="stage"?"STAGE":"LOOP"}</span>
@@ -1980,7 +2111,7 @@ function renderTracksView(){
     · ${nSess} session${nSess===1?"":"s"}
    </div>
    ${trend?`<div class="muted" style="font-size:.85em">PB trend: ${trend}</div>`:""}
-   ${v.focus?`<div style="font-size:.9em;margin-top:2px">🎯 focus: T${v.focus.corner} — ${v.focus.text}</div>`:""}
+   ${v.focus?`<div style="font-size:.9em;margin-top:2px">🎯 focus: T${v.focus.corner} — ${esc(v.focus.text)}</div>`:""}
    <div class="segrow" style="margin-top:8px">
     ${t.id!==db.active?`<button class="minib" onclick="selectTrack(${t.id});renderTracksView()">SELECT</button>`:""}
     <button class="minib" onclick="lbLoadInto('lbt_${t.id}',${t.id})">LEADERBOARD</button>
@@ -2017,7 +2148,8 @@ function renderSvActions(s){
  const el=document.getElementById("svActions"); if(!el) return;
  el.innerHTML=`
   <button class="b" style="background:var(--accent);color:var(--accent-ink);font-size:1em" onclick="openVideoView('${s.id}')">VIDEO OVERLAY (GOPRO / PHONE)</button>
-  <button class="b" style="background:var(--ok);color:#F9F9F9;font-size:1em" onclick="uploadSession('${s.id}')">SHARE LINK</button>
+  <button class="b" style="background:var(--ok);color:#F9F9F9;font-size:1em" onclick="uploadSession('${s.id}')">${s.shareId?"RE-SHARE LINK":"SHARE LINK"}</button>
+  ${s.shareId?`<button class="b" style="font-size:.95em" onclick="revokeShare('${s.id}')">REVOKE SHARE LINK</button>`:""}
   <button class="b" style="font-size:.95em" onclick="shareSession('${s.id}')">SHARE AS FILE (OFFLINE)</button>
   <button class="b" style="font-size:.95em" onclick="exportSessionCsv('${s.id}')">EXPORT LAP TIMES (CSV)</button>
   <button class="b" style="font-size:.95em" onclick="lbShowInSession()">VENUE LEADERBOARD</button>
@@ -2041,10 +2173,11 @@ function lbHideInSession(){
 function deleteAttempt(sessId, idx){
  const s=db.sessions.find(x=>x.id===sessId); if(!s) return;
  const a=s.attempts[idx]; if(!a) return;
- if(!confirm(`Delete ${(s.mode==="stage"?"run":"lap")} ${a.n} (${fmt(a.time)}) from this session?`)) return;
+ if(!confirm(`Remove ${(s.mode==="stage"?"run":"lap")} ${a.n} (${fmt(a.time)})?\n\nOnly this live-timed entry is removed. Laps found in the recording (◦ rows) always stay — they're re-read from the recording itself.`)) return;
  s.attempts.splice(idx,1);
  saveDb(); renderSessionUI();
- if(anaSessionId===sessId) renderSvRuns(s);   // keep the open session view in step
+ if(anaSessionId===sessId) rerenderRuns(s);   // keep the open session view in step
+                                              // WITHOUT dropping recovered ◦ rows
 }
 // Share/export a whole session as one self-contained JSON (metadata + laps +
 // 10 Hz trail + 50 Hz trace). Uses the phone's native share sheet if available
@@ -2060,10 +2193,24 @@ function sessionBundle(s){
 // The server caps uploads at 8 MB; a long session's full-rate stream can
 // exceed it — thin the hi-res data (halve until it fits; lap TIMES are exact
 // regardless, only replay smoothness steps down).
+// Netlify's synchronous functions reject bodies over ~6 MB before our code
+// runs, so the client cap sits under that (uploads between 6 and 7.5 MB used
+// to fail with an opaque 502).
+const UPLOAD_CAP=5500000;
 function bundleJsonFit(s){
  const bundle=sessionBundle(s);
+ // privacy: a link is one tap from public. Keep the venue, drop the drive to
+ // it — anything further than 2 km from the start line never leaves the phone
+ const t=db.tracks.find(x=>x.id===s.trackId);
+ const sg=t&&(t.gates||[]).find(g=>g.role==="startfinish"||g.role==="start");
+ if(sg){
+  const near=p=>p && p.la!=null && distM(sg.la,sg.lo,p.la,p.lo)<2000;
+  if(bundle.trail10hz) bundle.trail10hz=bundle.trail10hz.filter(near);
+  if(bundle.hires) bundle.hires=bundle.hires.filter(near);
+ }
+ bundle.token=settings.installToken;   // lets us revoke the link later
  let json=JSON.stringify(bundle);
- while(json.length>7500000 && bundle.hires && bundle.hires.length>2000){
+ while(json.length>UPLOAD_CAP && bundle.hires && bundle.hires.length>2000){
   bundle.hires=bundle.hires.filter((_,i)=>i%2===0);
   json=JSON.stringify(bundle);
  }
@@ -2095,6 +2242,7 @@ async function shareTrack(trackId){
 }
 function importTrackBundle(b){
  if(!b || b.kind!=="track" || !b.gates){ alert("That link isn't a RaceLogger track."); return; }
+ b=sanitizeBundle(b);
  // merge by name so re-sharing an updated track updates it instead of duplicating
  const nt=migrateTrack({id:Date.now(), name:b.track||"Shared track",
    mode:b.mode||"loop", gates:b.gates, outline:b.outline||undefined});
@@ -2110,19 +2258,22 @@ function importTrackBundle(b){
 // isn't deployed yet.
 async function uploadSession(id){
  const s=db.sessions.find(x=>x.id===(id||anaSessionId)); if(!s){ alert("No session."); return; }
- const best=s.attempts.length?Math.min(...s.attempts.map(a=>a.time)):null;
+ const best=sessionBest(s);
+ if(!s.shareId && !confirm("This uploads your GPS trace at the venue (the drive there is left out) "
+   +"and your driver name. Anyone with the link can open it; you can REVOKE it later.\n\nContinue?")) return;
  anaMsg("Uploading session…");
  try{
   const r=await fetch("/api/session",{method:"POST",
    headers:{"content-type":"application/json"}, body:bundleJsonFit(s)});
   if(!r.ok) throw new Error("server replied "+r.status);
   const {id:sid}=await r.json();
+  s.shareId=sid; saveDb(); renderSvActions(s);
   const link=location.origin+location.pathname+"#s="+sid;
   anaMsg("Share link ready.");
   try{
    if(navigator.share){
     await navigator.share({title:`RaceLogger — ${s.trackName}`,
-     text:`${s.attempts.length} ${s.mode==="stage"?"run":"lap"}${s.attempts.length===1?"":"s"}`
+     text:`${sessionLapCount(s)} ${s.mode==="stage"?"run":"lap"}${sessionLapCount(s)===1?"":"s"}`
       +(best!=null?`, best ${fmt(best)}`:""), url:link});
     return;
    }
@@ -2136,9 +2287,20 @@ async function uploadSession(id){
    +"(see dashboard/netlify/ in the project). SHARE / EXPORT DATA still works offline.");
  }
 }
+// take a shared link down again (only the phone that uploaded it can)
+async function revokeShare(id){
+ const s=db.sessions.find(x=>x.id===(id||anaSessionId)); if(!s||!s.shareId) return;
+ if(!confirm("Remove this session's share link? Anyone who has it will get 'not found'.")) return;
+ try{
+  const r=await fetch("/api/session/"+s.shareId,{method:"DELETE",
+   headers:{"content-type":"application/json"}, body:JSON.stringify({token:settings.installToken})});
+  if(!r.ok && r.status!==404) throw new Error("server replied "+r.status);
+  delete s.shareId; saveDb(); renderSvActions(s); anaMsg("Share link removed.");
+ }catch(e){ alert("Couldn't revoke: "+(e.message||e)); }
+}
 async function shareSession(id){
  const s=db.sessions.find(x=>x.id===(id||anaSessionId)); if(!s){ alert("No session."); return; }
- const best=s.attempts.length?Math.min(...s.attempts.map(a=>a.time)):null;
+ const best=sessionBest(s);
  const bundle=sessionBundle(s);
  const json=JSON.stringify(bundle);
  const fname=`racelog_${(s.trackName||"session").replace(/[^\w]+/g,"_")}_${stamp()}.json`;
@@ -2168,9 +2330,51 @@ function importSession(inp){
   }
  });
 }
+// Shape-check anything that arrives from outside: numbers must be numbers,
+// names are short plain strings, arrays are arrays. A hand-made bundle can't
+// plant script or NaN in the DB.
+const num=(v,d)=>(typeof v==="number"&&isFinite(v))?v:d;
+const str=(v,max)=>String(v==null?"":v).replace(/[\u0000-\u001f<>]/g,"").slice(0,max||40);
+function sanitizeGate(g){
+ if(!g||typeof g!=="object") return null;
+ const la=num(g.la,NaN), lo=num(g.lo,NaN);
+ if(!(Math.abs(la)<=90 && Math.abs(lo)<=180)) return null;
+ const role=["startfinish","start","finish","split"].includes(g.role)?g.role:"split";
+ const o={id:str(g.id||("g"+Math.random().toString(36).slice(2)),24), role, la, lo,
+  name:str(g.name||role,16), code:str(g.code||"",4),
+  heading:num(g.heading,90)%360, width:Math.max(4,Math.min(60,num(g.width,GATE_DEFAULT_WIDTH)))};
+ if(g.dir!=null) o.dir=num(g.dir,undefined);
+ return o;
+}
+function sanitizeSample(p){
+ if(!p||typeof p!=="object") return null;
+ const o={t:num(p.t,0), la:num(p.la,undefined), lo:num(p.lo,undefined), v:num(p.v,0),
+  ay:num(p.ay,0), ax:num(p.ax,undefined)};
+ if(o.la!==undefined && !(Math.abs(o.la)<=90 && Math.abs(o.lo)<=180)){ o.la=undefined; o.lo=undefined; }
+ if(p.c!=null) o.c=num(p.c,0);
+ return o;
+}
+function sanitizeBundle(b){
+ if(!b||typeof b!=="object") return null;
+ const out={app:"RaceLogger", kind:b.kind==="track"?"track":"session",
+  track:str(b.track||"Shared",40), mode:b.mode==="stage"?"stage":"loop",
+  driver:b.driver!=null?str(b.driver,24):undefined,
+  startedAt:num(b.startedAt,Date.now()), endedAt:b.endedAt!=null?num(b.endedAt,null):null,
+  gates:(Array.isArray(b.gates)?b.gates:[]).map(sanitizeGate).filter(Boolean).slice(0,40),
+  outline:Array.isArray(b.outline)?b.outline.filter(p=>Array.isArray(p)&&Math.abs(num(p[0],NaN))<=90&&Math.abs(num(p[1],NaN))<=180).map(p=>[p[0],p[1]]).slice(0,20000):undefined,
+  attempts:(Array.isArray(b.attempts)?b.attempts:[]).slice(0,500).map((a,i)=>({
+    n:num(a&&a.n,i+1), time:num(a&&a.time,0),
+    splits:(a&&a.splits&&typeof a.splits==="object")?Object.fromEntries(Object.entries(a.splits).slice(0,40).map(([k,v])=>[str(k,24),num(v,0)])):{},
+    samples:(Array.isArray(a&&a.samples)?a.samples:[]).slice(0,4000).map(sanitizeSample).filter(Boolean),
+    ts:num(a&&a.ts,0)})).filter(a=>a.time>0),
+  trail10hz:(Array.isArray(b.trail10hz)?b.trail10hz:[]).slice(0,40000).map(sanitizeSample).filter(Boolean),
+  hires:(Array.isArray(b.hires)?b.hires:[]).slice(0,240000).map(sanitizeSample).filter(Boolean)};
+ return out;
+}
 // shared by file import and cloud-link import
 function importBundle(b){
  if(!b || b.app!=="RaceLogger" || !("attempts" in b)){ alert("That isn't a RaceLogger session."); return null; }
+ b=sanitizeBundle(b);
  {
   const id="imp"+Date.now();
   // recreate the sender's track (with its gates) so the shared run can be fully
@@ -2216,7 +2420,7 @@ let anaSessionId=null;   // session shown in the view (null = raw .BIN file)
 function openAna(title){
  const t=document.getElementById("anaTitle"); if(t) t.textContent=title||"Analysis";
  const s=anaSessionId?db.sessions.find(x=>x.id===anaSessionId):null;
- if(s){ renderSvRuns(s); renderSvActions(s); }
+ if(s){ rerenderRuns(s); renderSvActions(s); }
  else{
   document.getElementById("svRuns").innerHTML="";
   document.getElementById("svActions").innerHTML="";
@@ -2453,13 +2657,20 @@ function toggleReplayOpt(o){
 }
 function initReplayMap(){
  if(replayMap){ setTimeout(()=>replayMap.invalidateSize(),60); return; }
- replayMap=L.map("replayMap",{zoomControl:false});
+ if(!mapsReady("replayMap")) return;
+ // canvas renderer: a 40-minute hi-res outing is 100k+ segments — as SVG
+ // paths that freezes a phone, on canvas it is one draw call per colour run
+ replayMap=L.map("replayMap",{zoomControl:false, preferCanvas:true});
  osm().addTo(replayMap);
 }
 function replaySegColor(pts,i){
  if(replayMode==="g"){
+  // 8 colour bins, not a continuous hue: the line is drawn as one polyline
+  // per colour RUN, and a colour that differs on every sample meant one
+  // polyline per sample
   const f=Math.min(1,Math.abs(pts[i].ay||0)/1.1);
-  return `hsl(${120-120*f},90%,50%)`;
+  const q=Math.round(f*7)/7;
+  return `hsl(${Math.round(120-120*q)},90%,50%)`;
  }
  if(replayMode==="delta"&&replayCalc.delta){
   const d=replayCalc.delta;
@@ -2486,7 +2697,10 @@ function drawReplayTrack(){
  const allLatLng=[];
  const flush=()=>{ if(seg.length>1)
   replayLayers.push(L.polyline(seg,{color:prevC,weight:6}).addTo(replayMap)); };
- for(let i=0;i<pts.length;i++){
+ // draw at most ~6k vertices (the scrubber still walks every sample) — 50 Hz
+ // rows are ~0.3 m apart at track speed, invisible at any map zoom
+ const step=Math.max(1,Math.ceil(pts.length/6000));
+ for(let i=0;i<pts.length;i+=step){
   const c=replaySegColor(pts,i), ll=[pts[i].la,pts[i].lo];
   allLatLng.push(ll);
   if(c!==prevC && seg.length){ flush(); seg=[seg[seg.length-1],ll]; }
@@ -2501,7 +2715,9 @@ function drawReplayTrack(){
    {color:gateColor(g),weight:4,opacity:.9}).addTo(replayMap));
  }
  // brake / throttle onset points — zone starts when zoned, raw transitions otherwise
- if(replayShowPts){
+ // raw per-sample transitions on an unzoned hi-res outing are thousands of
+ // markers; only draw them from smoothed zones, or on short sessions
+ if(replayShowPts && (replayPhases || pts.length<5000)){
   const phAt=i=>{
    if(replayPhases) return replayPhases[i];
    const dt=pts[i].t-pts[Math.max(0,i-1)].t;
@@ -2669,7 +2885,7 @@ function updateFullDash(curT,bestT,splitVals,stage,lastT){
  const as=activeSession();
  $("fdSess").textContent=as?`Session · ${as.attempts.length} run${as.attempts.length===1?"":"s"}`:"";
  $("fdSplits").innerHTML=splitGates().map(g=>
-  `<div><div class="fd-label">${g.name}</div><div>${splitVals[g.id]!=null?fmt(splitVals[g.id]):"--"}</div></div>`
+  `<div><div class="fd-label">${esc(g.name)}</div><div>${splitVals[g.id]!=null?fmt(splitVals[g.id]):"--"}</div></div>`
  ).join("");
 }
 
@@ -2719,6 +2935,19 @@ document.addEventListener("visibilitychange", ()=>{
  // survived, so a dead link also meant a sleepy screen: the death spiral
  // behind "2 of 10 laps captured" at the weekend)
  if(rxChar||demo||activeSession()) requestWakeLock();
+ keepAliveSync();
+ // On wake, rxChar is often STALE: Android tore the link down while the screen
+ // was off but Chrome delivers gattserverdisconnected only after the page
+ // resumes (sometimes seconds later, sometimes never). The old code saw rxChar
+ // set, took the "still connected" branch, and the reconnect never ran — that
+ // is the "doesn't reconnect when I turn the screen on" report. So check the
+ // radio's own answer (gatt.connected), and then prove it with traffic.
+ const linkDead = bleDev && (!rxChar || !bleDev.gatt || !bleDev.gatt.connected);
+ if(linkDead){
+  linkLost("screen woke, link was gone");
+  reconnect("wake");
+  return;
+ }
  if(rxChar||demo){
   // while the screen was off, packets queued and would otherwise "fast-forward"
   // the map on wake. Re-baseline the outlier filter and snap straight to the
@@ -2728,14 +2957,69 @@ document.addEventListener("visibilitychange", ()=>{
   // Chrome dropped BLE notifications while the screen was off — the logger's
   // flash still has those records, so ask it to re-stream the gap
   requestBackfill();
- } else if(bleDev){
-  // link died while the screen was off (the old version never reached this —
-  // it was nested inside the "still connected" branch, i.e. dead code)
-  conStatus("Reconnecting…");
-  wireUpDevice(bleDev).then(()=>{ conStatus(""); requestBackfill(); })
-   .catch(()=>conStatus("Logger not reachable — retrying…"));  // 6 s loop keeps at it
+  // ...and if nothing arrives within 4 s the link is a zombie: kill it so the
+  // disconnect handler + reconnect loop take over (the watchdog below does
+  // the same continuously, this just shortens the wait right after wake)
+  lastPktAt=performance.now()-1000;
  }
 });
+// ---- keep-alive with the screen off (opt-in, MENU → SCREEN OFF) ----
+// A web page cannot hold Bluetooth open while Android sleeps — Chrome freezes
+// the tab and the link dies (that is why the wake lock + reconnect exist).
+// The one thing Android does keep running with the screen off is a page
+// PLAYING AUDIO. So, when enabled, the app loops a 30 Hz tone (below what a
+// phone speaker can reproduce — inaudible) while connected or in a session;
+// Chrome treats the tab as playing media and leaves it, and the BLE link,
+// alive. Honest caveats: battery savers / aggressive OEM power managers can
+// still kill it, it uses a little battery, and it shows a media notification.
+const KA_WAV="data:audio/wav;base64,UklGRmQfAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YUAfAACAgYKEhYeIiYuMjo+QkpOUlpeYmZucnZ6goaKjpKWmqKmqq6ytra6vsLGysrO0tbW2tre3uLi5ubq6uru7u7u7u7u7u7u7u7u7u7u6urq5ubm4uLe3trW1tLOzsrGwr6+urayrqqmop6alpKKhoJ+enJuamZeWlZOSkY+OjYuKiIeGhIOBgH99fHp5eHZ1c3Jxb25ta2ppZ2ZlY2JhYF9dXFtaWVhXVlVUU1JRUE9OTk1MS0tKSUlISEdHRkZGRUVFRERERERERERERERERERERUVFRkZGR0dISElJSktLTE1OTk9QUVJTVFVWV1hZWltcXV9gYWJjZWZnaWprbW5vcXJzdXZ4eXp8fX+AgYOEhoeIiouNjo+RkpOVlpeZmpucnp+goaKkpaanqKmqq6ytrq+vsLGys7O0tbW2t7e4uLm5ubq6uru7u7u7u7u7u7u7u7u7u7u6urq5ubi4t7e2trW1tLOysrGwr66trayrqqmopqWko6KhoJ6dnJuZmJeWlJOSkI+OjIuJiIeFhIKBgH59e3p4d3Z0c3Fwb21sa2loZ2ZkY2JhX15dXFtaWVdWVVRTUlJRUE9OTU1MS0pKSUlISEdHRkZFRUVERERERERERERERERERERERUVFRkZGR0dISElKSktMTE1OT1BQUVJTVFVWV1hZWltdXl9gYWNkZWZoaWpsbW5wcXJ0dXd4eXt8fn+AgoOFhoeJioyNjpCRkpSVlpiZmpydnp+goqOkpaanqKmqq6ytrq+wsbGys7S0tba2t7e4uLm5ubq6uru7u7u7u7u8u7u7u7u7u7q6urm5ubi4t7e2trW0tLOysbGwr66trKuqqainpqWko6Kgn56dnJqZmJaVlJKRkI6NjIqJh4aFg4KAf358e3l4d3V0cnFwbm1samloZmVkY2FgX15dW1pZWFdWVVRTUlFQUE9OTUxMS0pKSUhIR0dGRkZFRUVERERERERERERERERERERERUVFRkZHR0hISUlKSktMTU1OT1BRUlJTVFVWV1laW1xdXl9hYmNkZmdoaWtsbW9wcXN0dnd4ent9fn+BgoSFh4iJi4yOj5CSk5SWl5iZm5ydnqChoqOkpaaoqaqrrK2trq+wsbKys7S1tba2t7e4uLm5urq6u7u7u7u7u7u7u7u7u7u7u7q6urm5ubi4t7e2tbW0s7OysbCvr66trKuqqainpqWkoqGgn56cm5qZl5aVk5KRj46Ni4qIh4aEg4GAf318enl4dnVzcnFvbm1ramlnZmVjYmFgX11cW1pZWFdWVVRTUlFQT05OTUxLS0pJSUhIR0dGRkZFRUVERERERERERERERERERERFRUVGRkZHR0hISUlKS0tMTU5OT1BRUlNUVVZXWFlaW1xdX2BhYmNlZmdpamttbm9xcnN1dnh5enx9f4CBg4SGh4iKi42Oj5GSk5WWl5mam5yen6ChoqSlpqeoqaqrrK2ur6+wsbKzs7S1tba3t7i4ubm5urq6u7u7u7u7u7u7u7u7u7u7u7q6urm5uLi3t7a2tbW0s7KysbCvrq2trKuqqaimpaSjoqGgnp2cm5mYl5aUk5KQj46Mi4mIh4WEgoGAfn17enh3dnRzcXBvbWxraWhnZmRjYmFfXl1cW1pZV1ZVVFNSUlFQT05NTUxLSkpJSUhIR0dGRkVFRURERERERERERERERERERERFRUVGRkZHR0hISUpKS0xMTU5PUFBRUlNUVVZXWFlaW11eX2BhY2RlZmhpamxtbnBxcnR1d3h5e3x+f4CCg4WGh4mKjI2OkJGSlJWWmJmanJ2en6Cio6SlpqeoqaqrrK2ur7CxsbKztLS1tra3t7i4ubm5urq6u7u7u7u7u7y7u7u7u7u7urq6ubm5uLi3t7a2tbS0s7KxsbCvrq2sq6qpqKempaSjoqCfnp2cmpmYlpWUkpGQjo2MiomHhoWDgoB/fnx7eXh3dXRycXBubWxqaWhmZWRjYWBfXl1bWllYV1ZVVFNSUVBQT05NTExLSkpJSEhHR0ZGRkVFRURERERERERERERERERERERFRUVGRkdHSEhJSUpKS0xNTU5PUFFSUlNUVVZXWVpbXF1eX2FiY2RmZ2hpa2xtb3Bxc3R2d3h6e31+f4GChIWHiImLjI6PkJKTlJaXmJmbnJ2eoKGio6Slpqipqqusra2ur7CxsrKztLW1tra3t7i4ubm6urq7u7u7u7u7u7u7u7u7u7u7urq6ubm5uLi3t7a1tbSzs7KxsK+vrq2sq6qpqKempaSioaCfnpybmpmXlpWTkpGPjo2LioiHhoSDgYB/fXx6eXh2dXNycW9ubWtqaWdmZWNiYWBfXVxbWllYV1ZVVFNSUVBPTk5NTEtLSklJSEhHR0ZGRkVFRUREREREREREREREREREREVFRUZGRkdHSEhJSUpLS0xNTk5PUFFSU1RVVldYWVpbXF1fYGFiY2VmZ2lqa21ub3Fyc3V2eHl6fH1/gIGDhIaHiIqLjY6PkZKTlZaXmZqbnJ6foKGipKWmp6ipqqusra6vr7CxsrOztLW1tre3uLi5ubm6urq7u7u7u7u7u7u7u7u7u7u7urq6ubm4uLe3tra1tbSzsrKxsK+ura2sq6qpqKalpKOioaCenZybmZiXlpSTkpCPjoyLiYiHhYSCgYB+fXt6eHd2dHNxcG9tbGtpaGdmZGNiYV9eXVxbWllXVlVUU1JSUVBPTk1NTEtKSklJSEhHR0ZGRUVFREREREREREREREREREREREVFRUZGRkdHSEhJSkpLTExNTk9QUFFSU1RVVldYWVpbXV5fYGFjZGVmaGlqbG1ucHFydHV3eHl7fH5/gIKDhYaHiYqMjY6QkZKUlZaYmZqcnZ6foKKjpKWmp6ipqqusra6vsLGxsrO0tLW2tre3uLi5ubm6urq7u7u7u7u7vLu7u7u7u7u6urq5ubm4uLe3tra1tLSzsrGxsK+urayrqqmop6alpKOioJ+enZyamZiWlZSSkZCOjYyKiYeGhYOCgH9+fHt5eHd1dHJxcG5tbGppaGZlZGNhYF9eXVtaWVhXVlVUU1JRUFBPTk1MTEtKSklISEdHRkZGRUVFREREREREREREREREREREREVFRUZGR0dISElJSkpLTE1NTk9QUVJSU1RVVldZWltcXV5fYWJjZGZnaGlrbG1vcHFzdHZ3eHp7fX5/gYKEhYeIiYuMjo+QkpOUlpeYmZucnZ6goaKjpKWmqKmqq6ytra6vsLGysrO0tbW2tre3uLi5ubq6uru7u7u7u7u7u7u7u7u7u7u6urq5ubm4uLe3trW1tLOzsrGwr6+urayrqqmop6alpKKhoJ+enJuamZeWlZOSkY+OjYuKiIeGhIOBgH99fHp5eHZ1c3Jxb25ta2ppZ2ZlY2JhYF9dXFtaWVhXVlVUU1JRUE9OTk1MS0tKSUlISEdHRkZGRUVFRERERERERERERERERERERUVFRkZGR0dISElJSktLTE1OTk9QUVJTVFVWV1hZWltcXV9gYWJjZWZnaWprbW5vcXJzdXZ4eXp8fX+AgYOEhoeIiouNjo+RkpOVlpeZmpucnp+goaKkpaanqKmqq6ytrq+vsLGys7O0tbW2t7e4uLm5ubq6uru7u7u7u7u7u7u7u7u7u7u6urq5ubi4t7e2trW1tLOysrGwr66trayrqqmopqWko6KhoJ6dnJuZmJeWlJOSkI+OjIuJiIeFhIKBf359e3p4d3Z0c3Fwb21sa2loZ2ZkY2JhX15dXFtaWVdWVVRTUlJRUE9OTU1MS0pKSUlISEdHRkZFRUVERERERERERERERERERERERUVFRkZGR0dISElKSktMTE1OT1BQUVJTVFVWV1hZWltdXl9gYWNkZWZoaWpsbW5wcXJ0dXd4eXt8fn+AgoOFhoeJioyNjpCRkpSVlpiZmpydnp+goqOkpaanqKmqq6ytrq+wsbGys7S0tba2t7e4uLm5ubq6uru7u7u7u7u8u7u7u7u7u7q6urm5ubi4t7e2trW0tLOysbGwr66trKuqqainpqWko6Kgn56dnJqZmJaVlJKRkI6NjIqJh4aFg4KAf358e3l4d3V0cnFwbm1samloZmVkY2FgX15dW1pZWFdWVVRTUlFQUE9OTUxMS0pKSUhIR0dGRkZFRUVERERERERERERERERERERERUVFRkZHR0hISUlKSktMTU1OT1BRUlJTVFVWV1laW1xdXl9hYmNkZmdoaWtsbW9wcXN0dnd4ent9fn+BgoSFh4iJi4yOj5CSk5SWl5iZm5ydnqChoqOkpaaoqaqrrK2trq+wsbKys7S1tba2t7e4uLm5urq6u7u7u7u7u7u7u7u7u7u7u7q6urm5ubi4t7e2tbW0s7OysbCvr66trKuqqainpqWkoqGgn56cm5qZl5aVk5KRj46Ni4qIh4aEg4GAf318enl4dnVzcnFvbm1ramlnZmVjYmFgX11cW1pZWFdWVVRTUlFQT05OTUxLS0pJSUhIR0dGRkZFRUVERERERERERERERERERERFRUVGRkZHR0hISUlKS0tMTU5OT1BRUlNUVVZXWFlaW1xdX2BhYmNlZmdpamttbm9xcnN1dnh5enx9f4CBg4SGh4iKi42Oj5GSk5WWl5mam5yen6ChoqSlpqeoqaqrrK2ur6+wsbKzs7S1tba3t7i4ubm5urq6u7u7u7u7u7u7u7u7u7u7u7q6urm5uLi3t7a2tbW0s7KysbCvrq2trKuqqaimpaSjoqGgnp2cm5mYl5aUk5KQj46Mi4mIh4WEgoGAfn17enh3dnRzcXBvbWxraWhnZmRjYmFfXl1cW1pZV1ZVVFNSUlFQT05NTUxLSkpJSUhIR0dGRkVFRURERERERERERERERERERERFRUVGRkZHR0hISUpKS0xMTU5PUFBRUlNUVVZXWFlaW11eX2BhY2RlZmhpamxtbnBxcnR1d3h5e3x+f4CCg4WGh4mKjI2OkJGSlJWWmJmanJ2en6Cio6SlpqeoqaqrrK2ur7CxsbKztLS1tra3t7i4ubm5urq6u7u7u7u7u7y7u7u7u7u7urq6ubm5uLi3t7a2tbS0s7KxsbCvrq2sq6qpqKempaSjoqCfnp2cmpmYlpWUkpGQjo2MiomHhoWDgoB/fnx7eXh3dXRycXBubWxqaWhmZWRjYWBfXl1bWllYV1ZVVFNSUVBQT05NTExLSkpJSEhHR0ZGRkVFRURERERERERERERERERERERFRUVGRkdHSEhJSUpKS0xNTU5PUFFSUlNUVVZXWVpbXF1eX2FiY2RmZ2hpa2xtb3Bxc3R2d3h6e31+f4GChIWHiImLjI6PkJKTlJaXmJmbnJ2eoKGio6Slpqipqqusra2ur7CxsrKztLW1tra3t7i4ubm6urq7u7u7u7u7u7u7u7u7u7u7urq6ubm5uLi3t7a1tbSzs7KxsK+vrq2sq6qpqKempaSioaCfnpybmpmXlpWTkpGPjo2LioiHhoSDgYB/fXx6eXh2dXNycW9ubWtqaWdmZWNiYWBfXVxbWllYV1ZVVFNSUVBPTk5NTEtLSklJSEhHR0ZGRkVFRUREREREREREREREREREREVFRUZGRkdHSEhJSUpLS0xNTk5PUFFSU1RVVldYWVpbXF1fYGFiY2VmZ2lqa21ub3Fyc3V2eHl6fH1/gIGDhIaHiIqLjY6PkZKTlZaXmZqbnJ6foKGipKWmp6ipqqusra6vr7CxsrOztLW1tre3uLi5ubm6urq7u7u7u7u7u7u7u7u7u7u7urq6ubm4uLe3tra1tbSzsrKxsK+ura2sq6qpqKalpKOioaCenZybmZiXlpSTkpCPjoyLiYiHhYSCgYB+fXt6eHd2dHNxcG9tbGtpaGdmZGNiYV9eXVxbWllXVlVUU1JSUVBPTk1NTEtKSklJSEhHR0ZGRUVFREREREREREREREREREREREVFRUZGRkdHSEhJSkpLTExNTk9QUFFSU1RVVldYWVpbXV5fYGFjZGVmaGlqbG1ucHFydHV3eHl7fH5/gIKDhYaHiYqMjY6QkZKUlZaYmZqcnZ6foKKjpKWmp6ipqqusra6vsLGxsrO0tLW2tre3uLi5ubm6urq7u7u7u7u7vLu7u7u7u7u6urq5ubm4uLe3tra1tLSzsrGxsK+urayrqqmop6alpKOioJ+enZyamZiWlZSSkZCOjYyKiYeGhYOCgH9+fHt5eHd1dHJxcG5tbGppaGZlZGNhYF9eXVtaWVhXVlVUU1JRUFBPTk1MTEtKSklISEdHRkZGRUVFREREREREREREREREREREREVFRUZGR0dISElJSkpLTE1NTk9QUVJSU1RVVldZWltcXV5fYWJjZGZnaGlrbG1vcHFzdHZ3eHp7fX5/gYKEhYeIiYuMjo+QkpOUlpeYmZucnZ6goaKjpKWmqKmqq6ytra6vsLGysrO0tbW2tre3uLi5ubq6uru7u7u7u7u7u7u7u7u7u7u6urq5ubm4uLe3trW1tLOzsrGwr6+urayrqqmop6alpKKhoJ+enJuamZeWlZOSkY+OjYuKiIeGhIOBgH99fHp5eHZ1c3Jxb25ta2ppZ2ZlY2JhYF9dXFtaWVhXVlVUU1JRUE9OTk1MS0tKSUlISEdHRkZGRUVFRERERERERERERERERERERUVFRkZGR0dISElJSktLTE1OTk9QUVJTVFVWV1hZWltcXV9gYWJjZWZnaWprbW5vcXJzdXZ4eXp8fX+AgYOEhoeIiouNjo+RkpOVlpeZmpucnp+goaKkpaanqKmqq6ytrq+vsLGys7O0tbW2t7e4uLm5ubq6uru7u7u7u7u7u7u7u7u7u7u6urq5ubi4t7e2trW1tLOysrGwr66trayrqqmopqWko6KhoJ6dnJuZmJeWlJOSkI+OjIuJiIeFhIKBgH59e3p4d3Z0c3Fwb21sa2loZ2ZkY2JhX15dXFtaWVdWVVRTUlJRUE9OTU1MS0pKSUlISEdHRkZFRUVERERERERERERERERERERERUVFRkZGR0dISElKSktMTE1OT1BQUVJTVFVWV1hZWltdXl9gYWNkZWZoaWpsbW5wcXJ0dXd4eXt8fn+AgoOFhoeJioyNjpCRkpSVlpiZmpydnp+goqOkpaanqKmqq6ytrq+wsbGys7S0tba2t7e4uLm5ubq6uru7u7u7u7u8u7u7u7u7u7q6urm5ubi4t7e2trW0tLOysbGwr66trKuqqainpqWko6Kgn56dnJqZmJaVlJKRkI6NjIqJh4aFg4KAf358e3l4d3V0cnFwbm1samloZmVkY2FgX15dW1pZWFdWVVRTUlFQUE9OTUxMS0pKSUhIR0dGRkZFRUVERERERERERERERERERERERUVFRkZHR0hISUlKSktMTU1OT1BRUlJTVFVWV1laW1xdXl9hYmNkZmdoaWtsbW9wcXN0dnd4ent9foCBgoSFh4iJi4yOj5CSk5SWl5iZm5ydnqChoqOkpaaoqaqrrK2trq+wsbKys7S1tba2t7e4uLm5urq6u7u7u7u7u7u7u7u7u7u7u7q6urm5ubi4t7e2tbW0s7OysbCvr66trKuqqainpqWkoqGgn56cm5qZl5aVk5KRj46Ni4qIh4aEg4GAf318enl4dnVzcnFvbm1ramlnZmVjYmFgX11cW1pZWFdWVVRTUlFQT05OTUxLS0pJSUhIR0dGRkZFRUVERERERERERERERERERERFRUVGRkZHR0hISUlKS0tMTU5OT1BRUlNUVVZXWFlaW1xdX2BhYmNlZmdpamttbm9xcnN1dnh5enx9f4CBg4SGh4iKi42Oj5GSk5WWl5mam5yen6ChoqSlpqeoqaqrrK2ur6+wsbKzs7S1tba3t7i4ubm5urq6u7u7u7u7u7u7u7u7u7u7u7q6urm5uLi3t7a2tbW0s7KysbCvrq2trKuqqaimpaSjoqGgnp2cm5mYl5aUk5KQj46Mi4mIh4WEgoGAfn17enh3dnRzcXBvbWxraWhnZmRjYmFfXl1cW1pZV1ZVVFNSUlFQT05NTUxLSkpJSUhIR0dGRkVFRURERERERERERERERERERERFRUVGRkZHR0hISUpKS0xMTU5PUFBRUlNUVVZXWFlaW11eX2BhY2RlZmhpamxtbnBxcnR1d3h5e3x+f4CCg4WGh4mKjI2OkJGSlJWWmJmanJ2en6Cio6SlpqeoqaqrrK2ur7CxsbKztLS1tra3t7i4ubm5urq6u7u7u7u7u7y7u7u7u7u7urq6ubm5uLi3t7a2tbS0s7KxsbCvrq2sq6qpqKempaSjoqCfnp2cmpmYlpWUkpGQjo2MiomHhoWDgoB/fnx7eXh3dXRycXBubWxqaWhmZWRjYWBfXl1bWllYV1ZVVFNSUVBQT05NTExLSkpJSEhHR0ZGRkVFRURERERERERERERERERERERFRUVGRkdHSEhJSUpKS0xNTU5PUFFSUlNUVVZXWVpbXF1eX2FiY2RmZ2hpa2xtb3Bxc3R2d3h6e31+f4GChIWHiImLjI6PkJKTlJaXmJmbnJ2eoKGio6Slpqipqqusra2ur7CxsrKztLW1tra3t7i4ubm6urq7u7u7u7u7u7u7u7u7u7u7urq6ubm5uLi3t7a1tbSzs7KxsK+vrq2sq6qpqKempaSioaCfnpybmpmXlpWTkpGPjo2LioiHhoSDgYB/fXx6eXh2dXNycW9ubWtqaWdmZWNiYWBfXVxbWllYV1ZVVFNSUVBPTk5NTEtLSklJSEhHR0ZGRkVFRUREREREREREREREREREREVFRUZGRkdHSEhJSUpLS0xNTk5PUFFSU1RVVldYWVpbXF1fYGFiY2VmZ2lqa21ub3Fyc3V2eHl6fH1/gIGDhIaHiIqLjY6PkZKTlZaXmZqbnJ6foKGipKWmp6ipqqusra6vr7CxsrOztLW1tre3uLi5ubm6urq7u7u7u7u7u7u7u7u7u7u7urq6ubm4uLe3tra1tbSzsrKxsK+ura2sq6qpqKalpKOioaCenZybmZiXlpSTkpCPjoyLiYiHhYSCgYB+fXt6eHd2dHNxcG9tbGtpaGdmZGNiYV9eXVxbWllXVlVUU1JSUVBPTk1NTEtKSklJSEhHR0ZGRUVFREREREREREREREREREREREVFRUZGRkdHSEhJSkpLTExNTk9QUFFSU1RVVldYWVpbXV5fYGFjZGVmaGlqbG1ucHFydHV3eHl7fH5/gIKDhYaHiYqMjY6QkZKUlZaYmZqcnZ6foKKjpKWmp6ipqqusra6vsLGxsrO0tLW2tre3uLi5ubm6urq7u7u7u7u7vLu7u7u7u7u6urq5ubm4uLe3tra1tLSzsrGxsK+urayrqqmop6alpKOioJ+enZyamZiWlZSSkZCOjYyKiYeGhYOCgH9+fHt5eHd1dHJxcG5tbGppaGZlZGNhYF9eXVtaWVhXVlVUU1JRUFBPTk1MTEtKSklISEdHRkZGRUVFREREREREREREREREREREREVFRUZGR0dISElJSkpLTE1NTk9QUVJSU1RVVldZWltcXV5fYWJjZGZnaGlrbG1vcHFzdHZ3eHp7fX5/gYKEhYeIiYuMjo+QkpOUlpeYmZucnZ6goaKjpKWmqKmqq6ytra6vsLGysrO0tbW2tre3uLi5ubq6uru7u7u7u7u7u7u7u7u7u7u6urq5ubm4uLe3trW1tLOzsrGwr6+urayrqqmop6alpKKhoJ+enJuamZeWlZOSkY+OjYuKiIeGhIOBgH99fHp5eHZ1c3Jxb25ta2ppZ2ZlY2JhYF9dXFtaWVhXVlVUU1JRUE9OTk1MS0tKSUlISEdHRkZGRUVFRERERERERERERERERERERUVFRkZGR0dISElJSktLTE1OTk9QUVJTVFVWV1hZWltcXV9gYWJjZWZnaWprbW5vcXJzdXZ4eXp8fX+AgYOEhoeIiouNjo+RkpOVlpeZmpucnp+goaKkpaanqKmqq6ytrq+vsLGys7O0tbW2t7e4uLm5ubq6uru7u7u7u7u7u7u7u7u7u7u6urq5ubi4t7e2trW1tLOysrGwr66trayrqqmopqWko6KhoJ6dnJuZmJeWlJOSkI+OjIuJiIeFhIKBgH59e3p4d3Z0c3Fwb21sa2loZ2ZkY2JhX15dXFtaWVdWVVRTUlJRUE9OTU1MS0pKSUlISEdHRkZFRUVERERERERERERERERERERERUVFRkZGR0dISElKSktMTE1OT1BQUVJTVFVWV1hZWltdXl9gYWNkZWZoaWpsbW5wcXJ0dXd4eXt8fn+AgoOFhoeJioyNjpCRkpSVlpiZmpydnp+goqOkpaanqKmqq6ytrq+wsbGys7S0tba2t7e4uLm5ubq6uru7u7u7u7u8u7u7u7u7u7q6urm5ubi4t7e2trW0tLOysbGwr66trKuqqainpqWko6Kgn56dnJqZmJaVlJKRkI6NjIqJh4aFg4KAf358e3l4d3V0cnFwbm1samloZmVkY2FgX15dW1pZWFdWVVRTUlFQUE9OTUxMS0pKSUhIR0dGRkZFRUVERERERERERERERERERERERUVFRkZHR0hISUlKSktMTU1OT1BRUlJTVFVWV1laW1xdXl9hYmNkZmdoaWtsbW9wcXN0dnd4ent9fg==";
+let kaEl=null;
+function keepAliveSync(){
+ const want=!!settings.keepAlive && (rxChar||activeSession()) && !demo;
+ if(want){
+  if(!kaEl){
+   kaEl=document.createElement("audio");
+   kaEl.src=KA_WAV; kaEl.loop=true; kaEl.volume=0.4; kaEl.preload="auto";
+   kaEl.setAttribute("playsinline",""); document.body.appendChild(kaEl);
+  }
+  if(kaEl.paused){
+   kaEl.play().then(()=>{
+    try{
+     if("mediaSession" in navigator){
+      navigator.mediaSession.metadata=new MediaMetadata({title:"RaceLogger", artist:"keeping the logger link alive"});
+      navigator.mediaSession.setActionHandler("pause",()=>{ settings.keepAlive=false; saveSettings(); keepAliveSync(); });
+     }
+    }catch(_){}
+   }).catch(()=>{ /* needs a tap first — retried on the next button press */ });
+  }
+ } else if(kaEl && !kaEl.paused){ kaEl.pause(); }
+}
+// audio can only START from a user gesture — piggy-back on any tap once wanted
+document.addEventListener("pointerup",()=>{ if(settings.keepAlive) keepAliveSync(); },{passive:true});
+// ---- link liveness watchdog ----
+// The logger sends status at 10 Hz. Five seconds of silence while connected
+// and visible means the connection is dead even if Android hasn't said so;
+// disconnecting it ourselves makes the reconnect path run instead of waiting
+// on a corpse forever.
+let lastPktAt=0;
+function linkLost(why){
+ rxChar=null; sendQ.length=0;
+ document.getElementById("dot-ble").classList.remove("on");
+ const cb=document.getElementById("connect");
+ if(cb){ cb.style.display="block"; cb.textContent="RECONNECT"; }
+ // a session in progress still needs the screen alive — the link dropping is
+ // exactly when the phone must NOT be allowed to sleep on top of it
+ if(!activeSession()) releaseWakeLock();
+ if(why) conStatus("Logger link lost ("+why+") — reconnecting…");
+}
+setInterval(()=>{
+ if(!rxChar || !bleDev || document.hidden) return;
+ if(lastPktAt && performance.now()-lastPktAt>5000){
+  linkLost("no data for 5 s");
+  try{ bleDev.gatt.disconnect(); }catch(_){}
+  reconnect("watchdog");
+ }
+},1000);
 
 // ---------------- BLE ----------------
 let bleDev=null;
@@ -2748,15 +3032,21 @@ async function connect(){
 }
 // Shared connect path for both the manual picker and auto-reconnect.
 async function wireUpDevice(dev){
- dev.addEventListener("gattserverdisconnected",()=>{
-  rxChar=null;
-  document.getElementById("dot-ble").classList.remove("on");
-  document.getElementById("connect").style.display="block";
-  document.getElementById("connect").textContent="RECONNECT";
-  releaseWakeLock();
-  // try to quietly climb back on when the logger comes back in range
-  if(settings.autoConnect!==false) watchForDevice(dev);
- });
+ // ONE disconnect listener per device object. Every reconnect used to add
+ // another, so after a bad afternoon each drop fired a dozen handlers (and a
+ // dozen overlapping reconnect attempts fighting over the radio).
+ if(!dev._rlWired){
+  dev._rlWired=true;
+  dev.addEventListener("gattserverdisconnected",()=>{
+   if(bleDev && bleDev!==dev) return;   // a stale device object from an earlier pairing
+   linkLost("");
+   conStatus("Logger disconnected — reconnecting…");
+   if(settings.autoConnect!==false){
+    reconnect("dropped");        // immediately, then with backoff (not a 6 s wait)
+    watchForDevice(dev);          // and let the radio tell us when it's back, where supported
+   }
+  });
+ }
  const server=await dev.gatt.connect();
  const svc=await server.getPrimaryService(NUS);
  rxChar=await svc.getCharacteristic(NUS_RX);
@@ -2766,11 +3056,12 @@ async function wireUpDevice(dev){
   const dv=e.target.value;
   onBleChunk(new Uint8Array(dv.buffer,dv.byteOffset,dv.byteLength));
  });
- bleDev=dev;
+ bleDev=dev; lastPktAt=performance.now(); reconAttempt=0;
  // several units exist now — remember which one is OURS so auto-connect never
  // grabs a friend's logger at a shared event, and show which unit we're on
  if(dev.name){ settings.lastLogger=dev.name; saveSettings(); }
  stopDemo();
+ keepAliveSync();
  stopPhoneGps();   // the logger's GPS takes over from the phone's
  showLive(dev.name&&dev.name.includes("-")?"#"+dev.name.split("-").pop():"");
  requestWakeLock();
@@ -2840,8 +3131,8 @@ async function autoConnect(){
 // a page reload. gatt.connect() on Android can hang FOREVER on a device that
 // isn't in range — the 8 s timeout + gatt.disconnect() unjams it so the next
 // tick gets a fresh attempt instead of queueing behind a corpse.
-let reconBusy=false;
-setInterval(async()=>{
+let reconBusy=false, reconAttempt=0, reconTimer=null;
+async function reconnect(why){
  if(rxChar||demo||document.hidden||reconBusy) return;
  if(settings.autoConnect===false || pg.watch!=null) return;
  reconBusy=true;
@@ -2853,15 +3144,25 @@ setInterval(async()=>{
      ||ds.find(d=>d.name&&d.name.startsWith("RaceLogger"));
   }
   if(dev){
+   reconAttempt++;
+   conStatus("Reconnecting to "+(dev.name||"logger")+(reconAttempt>1?" (try "+reconAttempt+")":"")+"…");
+   // a dead-but-not-yet-reported GATT object refuses a new connect(); clear it first
+   try{ if(dev.gatt && dev.gatt.connected===false && rxChar===null) dev.gatt.disconnect(); }catch(_){}
    await Promise.race([wireUpDevice(dev),
     new Promise((_,rej)=>setTimeout(()=>rej(new Error("timeout")),8000))]);
    conStatus("");
+   if(activeSession()) conStatus("Reconnected — recovering anything missed…", true);
   }
  }catch(e){
   if(bleDev) try{ bleDev.gatt.disconnect(); }catch(_){}
+  // back off 1 → 2 → 4 → 6 s (the interval below is the 6 s floor anyway)
+  const wait=Math.min(6000, 1000*Math.pow(2, Math.min(reconAttempt,3)-1));
+  if(reconTimer) clearTimeout(reconTimer);
+  reconTimer=setTimeout(()=>{ reconTimer=null; reconnect("retry"); }, wait);
  }
  finally{ reconBusy=false; }
-},6000);
+}
+setInterval(()=>reconnect("tick"),6000);   // safety net: nothing can stay silently disconnected
 async function watchForDevice(dev){
  if(!dev || rxChar || !dev.watchAdvertisements) return;
  try{
@@ -2880,11 +3181,27 @@ function showLive(modeTxt){
  document.getElementById("mode").textContent=modeTxt;
  setTimeout(initMini,100);
 }
+// Commands go out ONE AT A TIME. syncGate fires "gate …" and "cooldown …"
+// back-to-back; on Android the second writeValue used to fail with "GATT
+// operation already in progress" and was silently dropped — the banner said
+// ARMED while the device had no gate.
+const sendQ=[]; let sendBusy=false;
 async function send(cmd){
  if(demo){ demoCommand(cmd); return; }
- if(rxChar) try{
-  await rxChar.writeValue(new TextEncoder().encode(cmd+"\n"));
- }catch(_){}
+ if(!rxChar) return;
+ sendQ.push(cmd);
+ if(sendBusy) return;
+ sendBusy=true;
+ try{
+  while(sendQ.length){
+   const c=sendQ.shift();
+   for(let attempt=0;attempt<3;attempt++){
+    if(!rxChar) break;
+    try{ await rxChar.writeValue(new TextEncoder().encode(c+"\n")); break; }
+    catch(_){ await new Promise(r=>setTimeout(r,120)); }
+   }
+  }
+ } finally { sendBusy=false; }
 }
 
 // ---------------- BLE byte stream (JSON lines + framed binary files) ----------------
@@ -2892,6 +3209,7 @@ async function send(cmd){
 // to binary: the next `size` raw bytes are the log file, then "#END".
 let rxBytes=new Uint8Array(0), rxBin=null, xferStart=0, xferAction="analyze";
 function onBleChunk(u8){
+ lastPktAt=performance.now();
  const merged=new Uint8Array(rxBytes.length+u8.length);
  merged.set(rxBytes); merged.set(u8,rxBytes.length);
  rxBytes=merged;
@@ -2917,6 +3235,9 @@ function handleLine(line){
  if(line.startsWith("#FILE ")){
   const parts=line.split(" ");
   const size=parseInt(parts[2]);
+  // a header with an unparsable size used to wedge the byte stream for good
+  // (Uint8Array(NaN), slice(NaN) never consumed, every status line swallowed)
+  if(!Number.isFinite(size) || size<=0 || size>16*1024*1024){ alert("Logger sent a bad file header — try again."); return; }
   rxBin={name:parts[1], size:size, got:0, buf:new Uint8Array(size)};
   xferStart=Date.now();
   xferProgress();
@@ -2957,7 +3278,7 @@ function xferProgress(){
  const pct=Math.round(100*rxBin.got/rxBin.size);
  const kbs=(rxBin.got/1024)/Math.max(0.5,(Date.now()-xferStart)/1000);
  // segmented fill, like an LED rev counter — green through marigold to red
- el.innerHTML=`<div class="l">Downloading ${rxBin.name}</div>
+ el.innerHTML=`<div class="l">Downloading ${esc(rxBin.name)}</div>
   <div style="background:var(--card2);border:2px solid var(--ink);border-radius:2px;
        height:18px;margin:6px 0;padding:2px">
    <div style="height:100%;width:${pct}%;
@@ -3006,12 +3327,12 @@ function renderLoggerFiles(files){
  if(!files.length){ el.innerHTML='<span class="muted">No log files on the logger.</span>'; return; }
  el.innerHTML=files.map(f=>
   `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">
-    <span style="flex:1">${f.n}</span>
+    <span style="flex:1">${esc(f.n)}</span>
     <span class="muted">${(f.s/1024).toFixed(0)} KB · ~${Math.round(f.s/15000)}s</span>
     <button style="background:var(--accent);color:var(--accent-ink);border:2px solid var(--ink);border-radius:2px;padding:6px 10px;font-weight:700"
-     onclick="getLog('${f.n}','analyze')">OPEN</button>
+     onclick="getLog(${JSON.stringify(String(f.n)).replace(/"/g,"&quot;")},'analyze')">OPEN</button>
     <button style="background:var(--card2);color:var(--fg);border:2px solid var(--ink);border-radius:2px;padding:6px 10px;font-weight:700"
-     onclick="getLog('${f.n}','save')">SAVE</button>
+     onclick="getLog(${JSON.stringify(String(f.n)).replace(/"/g,"&quot;")},'save')">SAVE</button>
    </div>`).join("");
 }
 let resumeRecAfterXfer=false, pendingGetName=null, pendingGetSince=0;
@@ -3135,7 +3456,7 @@ function onStatus(s){
   }
   if(fixOK) checkSplits();
  }
- if(fixOK) prevFix=[s.la,s.lo];   // update AFTER crossing checks used it as "last position"
+ if(fixOK){ prevFix=[s.la,s.lo]; prevFixT=stNow(); if((s.v||0)>2 && s.hd!=null) lastMovingHd=s.hd; }   // update AFTER crossing checks used it as "last position"
  render();
 }
 // paddock strip: the between-runs answer ("how was that one?") right on the
@@ -3301,10 +3622,11 @@ function updateDrivingState(){
 // for a 0-x), then record the interpolated time to reach 'to'. Best per bracket
 // is kept for the session. Post-run analysis scans the recorded trace the same
 // way. Times are interpolated between samples for sub-0.1s accuracy.
-function resetAccel(){ accelState=[]; accelBest={}; accelPrevV=0; accelPrevT=performance.now(); }
+function resetAccel(){ accelState=[]; accelBest={}; accelPrevV=0; accelPrevT=stNow(); }
 function updateAccel(){
  if(st.f<3 || st.v==null) return;
- const now=performance.now(), v=st.v, brs=settings.accelBrackets||[];
+ const now=stNow(), v=st.v, brs=settings.accelBrackets||[];   // logger clock, not packet arrival
+ if(now<accelPrevT-1000){ accelState=[]; accelPrevT=now; }     // clock source changed / reboot
  for(let i=0;i<brs.length;i++){
   const [from,to]=brs[i], arm=Math.max(from,0.3);
   const s=accelState[i]||(accelState[i]={phase:"idle",t0:0});
@@ -3404,26 +3726,34 @@ function checkStage(){
  if(st.f<3 || !st.la) return;
  const sg=gate("start"), fg=gate("finish");
  if(!sg) return;
+ // Runs are timed on the LOGGER's clock (stNow) with the crossing interpolated
+ // inside the tick. performance.now() was the phone's packet-ARRIVAL time —
+ // Android batches BLE notifications, so a run's start or finish landed
+ // wherever its packet happened to be delivered (hundreds of ms of error).
+ if(stageT0!==null && stNow()<stageT0-1000){ stageT0=null; stageSplitsHit={}; replaySamples=[]; nextSplitIdx=0; }   // logger rebooted
  if(stageT0===null){
-  if((st.v||0)>(settings.armSpeedMs||3) && crossedGate(sg)){
-   stageT0=performance.now();
+  const u=((st.v||0)>(settings.armSpeedMs||3))?crossedGateU(sg):-1;
+  if(u>=0){
+   stageT0=crossTimeAt(u);
    replaySamples=[]; nextSplitIdx=0;
   }
   return;
  }
- replaySamples.push({t:(performance.now()-stageT0)/1000, la:st.la, lo:st.lo,
+ replaySamples.push({t:(stNow()-stageT0)/1000, la:st.la, lo:st.lo,
   v:st.v, ay:st.ay,
   rpm:obd.connected?obd.rpm:undefined, th:obd.connected?obd.thr:undefined});
  const sg2=splitGates();   // driving order; only the next expected split fires
  if(nextSplitIdx<sg2.length){
   const g=sg2[nextSplitIdx];
-  if(stageSplitsHit[g.id]===undefined && crossedGate(g)){
-   stageSplitsHit[g.id]=(performance.now()-stageT0)/1000;
+  const us=stageSplitsHit[g.id]===undefined?crossedGateU(g):-1;
+  if(us>=0){
+   stageSplitsHit[g.id]=(crossTimeAt(us)-stageT0)/1000;
    nextSplitIdx++;
   }
  }
- if(fg && crossedGate(fg)){
-  const t=(performance.now()-stageT0)/1000;
+ const uf=fg?crossedGateU(fg):-1;
+ if(uf>=0){
+  const t=(crossTimeAt(uf)-stageT0)/1000;
   // a "run" shorter than the minimum lap is a false trigger (lines close
   // together, or a double-cross) — a 4.91 s phantom once sat as BEST and
   // pushed every real run's delta to +105 s. Discard and re-arm.
@@ -3452,7 +3782,7 @@ function fmt(s){ if(!s||s<=0) return "--";
 function renderSplitsRow(){
  const el=document.getElementById("splits");
  el.innerHTML=`<div class="card"><div class="l">Lap</div><div class="v" id="lapn" style="font-size:1.1em">--</div></div>`
-  +splitGates().map(g=>`<div class="card"><div class="l">${g.name}</div>`
+  +splitGates().map(g=>`<div class="card"><div class="l">${esc(g.name)}</div>`
    +`<div class="v" id="splitv-${g.id}" style="font-size:1.1em">--</div></div>`).join("")
   +`<div class="card"><div class="l">Last</div><div class="v" id="lastlap" style="font-size:1.1em">--</div></div>`;
 }
@@ -3491,7 +3821,7 @@ function render(){
   dsEl.style.color=phaseInk(p);
  }
 
- const curT=stage?(stageT0!==null?(performance.now()-stageT0)/1000:null):(st.a?st.c:null);
+ const curT=stage?(stageT0!==null?(stNow()-stageT0)/1000:null):(st.a?st.c:null);
  const bestT=stage?stageBestRun:st.b;
  const splitVals=stage?stageSplitsHit:splitTimes;
 
@@ -3565,8 +3895,19 @@ function carIcon(idAttr){
    color:#e33">▲</div>`,
   iconSize:[22,22], iconAnchor:[11,11]});
 }
+// maps need Leaflet; if it failed to load (first open with no signal and no
+// cached copy) say so in the box instead of throwing "L is not defined" from
+// four places
+function mapsReady(id){
+ if(typeof L!=="undefined") return true;
+ const el=id&&document.getElementById(id);
+ if(el && !el.dataset.offlineNote){ el.dataset.offlineNote="1";
+  el.innerHTML='<div class="muted" style="padding:14px;text-align:center">Map library didn\'t load (no connection yet). Timing works without it — reload when online once and it stays cached.</div>'; }
+ return false;
+}
 function initMap(){
  if(map){ setTimeout(()=>map.invalidateSize(),100); return; }
+ if(!mapsReady("map")) return;
  map=L.map("map",{zoomControl:false});
  osm().addTo(map);
  const sg=startGate();
@@ -3592,6 +3933,7 @@ function initMap(){
 }
 function initMini(){
  if(mini){ setTimeout(()=>mini.invalidateSize(),100); return; }
+ if(!mapsReady("minimap")) return;
  if(settings.liveUI && settings.liveUI.minimap && settings.liveUI.minimap.on===false)
   return;   // user hid the mini map — don't loop waiting for it to lay out
  if(!document.getElementById("minimap").offsetParent){
@@ -3797,11 +4139,14 @@ function showSheet(){
       onclick="hideSheet();autoSplits()">✨ AUTO-PLACE SPLITS ALONG WALKED TRACK</button>
      <div class="muted" style="text-align:center;margin-bottom:6px">taps near the walked line snap onto it</div>`
    :"");
- sheetUp();
+ sheetUp("Place mark on");
 }
 // the bottom sheet is one back-stack layer: pushed when it first opens,
 // consumed when it fully closes (content swaps in between don't count)
-function sheetUp(){
+function sheetUp(pre){
+ // the "Place mark on" prefix belongs to the map-tap sheet only — it used to
+ // read "Place mark on Settings" / "Place mark on Debrief"
+ const pe=document.getElementById("sheetpre"); if(pe) pe.textContent=pre?pre+" ":"";
  const sh=document.getElementById("sheet");
  if(!sh.classList.contains("up")){ sh.classList.add("up"); navPush(); }
 }
@@ -3924,7 +4269,9 @@ function showGateHandles(g){
  const endDrag=ll=>{
   const d=distM(g.la, g.lo, ll.lat, ll.lng);
   g.width=Math.max(4, Math.min(80, 2*d));
-  g.heading=bearingDeg(g.la, g.lo, ll.lat, ll.lng)%360;
+  const nh=bearingDeg(g.la, g.lo, ll.lat, ll.lng)%360;
+  if(g.dir!=null) g.dir=Math.round((g.dir+(nh-(g.heading||90))+720)%360);   // driven direction follows the line
+  g.heading=nh;
   redrawMarks();
  };
  mk(p1[0], p1[1], "#F2A900", endDrag);
@@ -3945,7 +4292,7 @@ function toggleMove(){ editMove=!editMove; renderEditSheet(); }
 // Move is the one bulky control, tucked behind an expander to spare the map.
 function renderEditSheet(){
  const g=gates().find(x=>x.id===editingGate); if(!g) return;
- document.getElementById("sheettrack").textContent=`${g.name} — ${tr().name}`;
+ document.getElementById("sheettrack").textContent=`${g.name} — ${tr().name}`;   // textContent: safe
  const moveDrawer=editMove?`
   <div style="display:flex;align-items:center;gap:12px;justify-content:center;margin-top:6px">
    <div class="dpad" style="width:114px;margin:0">
@@ -3985,11 +4332,22 @@ function renderEditSheet(){
   ${moveDrawer}
   <div class="muted" style="text-align:center;margin-top:6px">
    width ${Math.round(mOrFt(g.width||GATE_DEFAULT_WIDTH))} ${ftOrMLabel()}
-   · heading ${Math.round(g.heading||90)}°</div>`;
+   · heading ${Math.round(g.heading||90)}°
+   · driven ${g.dir!=null?`→ ${Math.round(g.dir)}°`:"either way (learns on first crossing)"}
+   <button class="minib" style="margin-left:6px" onclick="flipGateDir()">${g.dir!=null?"⇄ FLIP":"SET ONE-WAY"}</button></div>`;
+}
+// crossings the WRONG way through a directed gate don't count (paddock
+// returns, reversing on the grid). FLIP if the learned direction is wrong.
+function flipGateDir(){
+ const g=gates().find(x=>x.id===editingGate); if(!g) return;
+ if(g.dir==null) g.dir=Math.round(((g.heading||90)-90+360)%360);
+ else g.dir=Math.round((g.dir+180)%360);
+ saveDb(); renderEditSheet();
 }
 function rotateGate(delta){
  const g=gates().find(x=>x.id===editingGate); if(!g) return;
  g.heading=((g.heading||90)+delta+360)%360;
+ if(g.dir!=null) g.dir=Math.round((g.dir+delta+720)%360);
  saveDb(); redrawMarks(); renderEditSheet(); showGateHandles(g);
 }
 function widthGate(delta){
@@ -4058,10 +4416,14 @@ function openSettings(){
    <button class="b" style="background:${seg(settings.voice)}" onclick="toggleSetting('voice')">VOICE COACH ${settings.voice?"ON":"OFF"}</button>
    <button class="b" style="background:${seg(settings.autoConnect!==false)}" onclick="toggleSetting('autoConnect')">AUTO-CONNECT ${settings.autoConnect!==false?"ON":"OFF"}</button>
   </div>
+  <div class="segrow">
+   <button class="b" style="background:${seg(!!settings.keepAlive)}" onclick="toggleSetting('keepAlive');keepAliveSync()">KEEP LINK ALIVE (SCREEN OFF) ${settings.keepAlive?"ON":"OFF"}</button>
+  </div>
+  <div class="muted" style="text-align:center;margin:-4px 0 8px;font-size:.82em">plays an inaudible tone so Android keeps the app — and the Bluetooth link — running with the screen off. A media notification appears; battery savers can still stop it. Laps missed while asleep are recovered from the logger either way.</div>
   <div class="muted" style="text-align:center;margin-bottom:8px">
    voice coach speaks lap/run times &amp; split deltas · auto-connect re-links the
    last paired logger on load (after one manual connect)</div>
-  <button class="b" style="background:var(--card2)" onclick="setDriverName()">DRIVER NAME${settings.driverName?": "+settings.driverName.toUpperCase():""}</button>
+  <button class="b" style="background:var(--card2)" onclick="setDriverName()">DRIVER NAME${settings.driverName?": "+esc(settings.driverName.toUpperCase()):""}</button>
   <button class="b" style="background:var(--card2)" onclick="settings.autoSaveSession=settings.autoSaveSession===false;saveSettings();openSettings()">AUTO-SAVE FILES: ${settings.autoSaveSession!==false?"ON":"OFF"}</button>
   <div class="muted" style="text-align:center;margin-bottom:8px">travels with shared sessions and
    labels head-to-head comparisons</div>
@@ -4576,7 +4938,7 @@ function camDrawLoop(){
  else x.clearRect(0,0,c.width,c.height);           // preview: HUD only, camera below
  if(!cam.path || ++cam.pathAge>150){ cam.pathAge=0; cam.path=camPath(); }
  const stage=tr().mode==="stage";
- const rel=stage?(stageT0!==null?(performance.now()-stageT0)/1000:0):(st.a?(st.c||0):0);
+ const rel=stage?(stageT0!==null?(stNow()-stageT0)/1000:0):(st.a?(st.c||0):0);
  drawHUD(x,c.width,c.height,{v:st.v||0, ay:st.ay||0, ax:0,
   la:(st.f>=3?st.la:null), lo:st.lo, rel, path:cam.path});
  if(cam.on){
@@ -4910,6 +5272,10 @@ function gateCrossTimes(pts, g, minV){
  const [p1,p2]=gateEndpoints(g);
  const A=toXY(p1[0],p1[1],pts), B=toXY(p2[0],p2[1],pts);   // gate endpoints in pts frame
  const sx=B[0]-A[0], sy=B[1]-A[1];
+ // directed gate: once the gate knows which way it is driven (g.dir, learned
+ // from the first crossing at speed in a session), a crossing the WRONG way —
+ // paddock return, reversing on the grid — is not a crossing at all
+ const dv=gateDirVec(g);
  const out=[];
  for(let i=0;i<pts.length-1;i++){
   const a=pts[i], b=pts[i+1];
@@ -4917,10 +5283,88 @@ function gateCrossTimes(pts, g, minV){
   if(Math.abs(den)<1e-12) continue;
   const qx=A[0]-a.x, qy=A[1]-a.y;
   const u=(qx*sy-qy*sx)/den, v=(qx*ry-qy*rx)/den;
-  if(u>=0&&u<1&&v>=0&&v<=1 && ((a.spd||0)>minV||(b.spd||0)>minV))   // crossed, at speed
+  if(u>=0&&u<1&&v>=0&&v<=1 && ((a.spd||0)>minV||(b.spd||0)>minV)   // crossed, at speed
+     && (!dv || rx*dv[0]+ry*dv[1]>0))                              // ...the right way
    out.push(a.t+u*(b.t-a.t));
  }
  return out;
+}
+// ONE lap detector. The session view, venue memory / PB, leaderboard submit
+// and lap compare all used to carry their own copy of this loop and quietly
+// disagreed (different best lap depending on which panel asked). pts must be
+// projected. Returns {laps:[{n,a,b,time,rows,sec[]}], err}.
+function detectLaps(pts, t, opts){
+ opts=opts||{};
+ const stage=t.mode==="stage", gts=t.gates||[];
+ const sg=gts.find(g=>g.role===(stage?"start":"startfinish"));
+ const fg=stage?gts.find(g=>g.role==="finish"):sg;
+ if(!sg) return {laps:[], err:`no start${stage?"":"/finish"} line`};
+ if(stage && !fg) return {laps:[], err:"stage mode but no finish line"};
+ const armV=Math.max(1,settings.armSpeedMs||3);   // paddock trundles don't start laps
+ const minLap=settings.minLapS||10, cool=settings.lapCooldown||0;
+ // crossings are sorted by time, so lap rows are a contiguous slice — no
+ // per-lap filter over the whole session (O(laps × n) on 240k-row sessions)
+ const rowsBetween=(a,b)=>{
+  let i=0, j=pts.length;
+  { let l=0,h=pts.length; while(l<h){const m=(l+h)>>1; if(pts[m].t<a) l=m+1; else h=m;} i=l; }
+  { let l=i,h=pts.length; while(l<h){const m=(l+h)>>1; if(pts[m].t<=b) l=m+1; else h=m;} j=l; }
+  return pts.slice(i,j);
+ };
+ const laps=[];
+ let crossesSF=0;
+ if(stage){
+  const crS=gateCrossTimes(pts,sg,armV), crF=gateCrossTimes(pts,fg,armV);
+  crossesSF=crS.length+crF.length;
+  let lastFinish=-1;   // a start crossed twice before one finish = one run
+  for(const cs of crS){
+   if(cs<=lastFinish) continue;
+   // a finish sooner than the minimum lap is a false trigger (lines close
+   // together / double-cross) — same rule the live timer applies
+   const cf=crF.find(x=>x>=cs+minLap);
+   if(cf!==undefined){ laps.push({a:cs,b:cf,time:cf-cs,rows:rowsBetween(cs,cf)}); lastFinish=cf; }
+  }
+ }else{
+  const cr=gateCrossTimes(pts,sg,armV);
+  crossesSF=cr.length;
+  let li=0;
+  while(li<cr.length-1){
+   const a=cr[li]; let fi=li+1;
+   while(fi<cr.length && cr[fi]-a<minLap) fi++;   // finish = next crossing a full lap later
+   if(fi>=cr.length) break;
+   const b=cr[fi];
+   laps.push({a, b, time:b-a, rows:rowsBetween(a,b)});
+   li=fi;
+   if(cool>0) while(li<cr.length && cr[li]<b+cool) li++;   // stage-like arming gap
+  }
+ }
+ // sectors from the track's split gates. Crossings are consumed IN ORDER
+ // (each split after the previous one), and a missed split voids both the
+ // sector it ends AND the one that follows — the old code silently folded two
+ // sectors into one and reported "lost most in S3 (+24.9)".
+ const splits=gts.filter(g=>g.role==="split");
+ const splitCr={};
+ for(const g of splits) splitCr[g.id]=gateCrossTimes(pts,g);
+ for(const l of laps){
+  l.sec=[]; let last=l.a, missed=false;
+  for(const g of splits){
+   const c=splitCr[g.id].find(x=>x>last&&x<l.b);
+   if(c!==undefined){ l.sec.push(missed?null:c-last); last=c; missed=false; }
+   else { l.sec.push(null); missed=true; }
+  }
+  if(splits.length) l.sec.push(missed?null:l.b-last);
+ }
+ laps.forEach((l,i)=>l.n=i+1);
+ const thr=outThreshold(laps.map(l=>l.time));
+ const best=laps.length?laps.reduce((a,b)=>a.time<b.time?a:b):null;
+ laps.forEach(l=>{ l.out=l.time>thr && l!==best; });
+ return {laps, best, crossesSF, stage};
+}
+// unit vector (east, north) of the direction a gate is driven, or null when
+// the gate has not learned it yet
+function gateDirVec(g){
+ if(g==null || g.dir==null || !isFinite(g.dir)) return null;
+ const r=g.dir*Math.PI/180;
+ return [Math.sin(r), Math.cos(r)];
 }
 async function analyzeFile(inp){
  const f=inp.files[0]; if(!f) return; inp.value="";
@@ -4961,8 +5405,17 @@ function analyzeBuffer(buf, fname){
  pts.forEach(g=>g.t=(g.ms-ms0)/1000);
  I.forEach(s=>s.t=(s.ms-ms0)/1000);
  // hero map from the parsed log too — full 25 Hz GPS from the .BIN
- setupReplay(pts.map(g=>({t:g.t, la:g.lat, lo:g.lon, v:g.spd, ay:g.ay, ax:g.ax})),
-             "from .BIN");
+ const samples=pts.map(g=>({t:g.t, la:g.lat, lo:g.lon, v:g.spd, ay:g.ay, ax:g.ax}));
+ setupReplay(samples, "from .BIN");
+ // a fetched recording is KEPT: it used to be re-downloaded (and recording
+ // re-paused) every time the session was opened
+ if(xferAction==="analyze-session" && anaSessionId){
+  const s=db.sessions.find(x=>x.id===anaSessionId);
+  if(s && !s.hasHires){
+   s.hasHires=saveHires(s.id, decimateSamples(samples, 20000));
+   s._vint=null; saveDb();
+  }
+ }
  const hint=document.getElementById("svHint");
  if(hint) hint.innerHTML="";   // full-rate data is in — clear the 10 Hz notice
  runAnalysis(pts, I, fname);
@@ -4976,58 +5429,20 @@ function runAnalysis(pts, I, fname){
  const sg=startGate(), fg=finishGate();
  if(!sg){ anaMsg(`Track "${t.name}" has no start${stage?"":"/finish"} line — set one on the Map tab first.`); return; }
  if(stage && !fg){ anaMsg(`Track "${t.name}" is in stage mode but has no finish line set.`); return; }
- let laps=[];
- const armV=Math.max(1,settings.armSpeedMs||3);   // paddock trundles don't start laps
- if(stage){
-  const crS=gateCrossTimes(pts,sg,armV);
-  const crF=gateCrossTimes(pts,fg,armV);
-  if(!crS.length||!crF.length){ anaMsg(`The driven line never crosses both the start and finish of "${t.name}" at speed. Right track selected, and are the lines placed across the path?`); return; }
-  let lastFinish=-1;   // a start crossed twice before one finish = one run,
-  for(const cs of crS){ // not two overlapping ones
-   if(cs<=lastFinish) continue;
-   const cf=crF.find(x=>x>cs);
-   if(cf!==undefined){
-    laps.push({a:cs,b:cf,time:cf-cs,rows:pts.filter(g=>g.t>=cs&&g.t<=cf)});
-    lastFinish=cf;
-   }
-  }
- } else {
-  const cr=gateCrossTimes(pts,sg,armV);
-  if(cr.length<2){ anaMsg(`The driven line only crosses the start/finish of "${t.name}" ${cr.length} time(s) at speed — need at least two for a lap. Right track selected?`); return; }
-  const minLap=settings.minLapS||10, cool=settings.lapCooldown||0;
-  let li=0;
-  while(li<cr.length-1){
-   const a=cr[li];
-   let fi=li+1;
-   while(fi<cr.length && cr[fi]-a<minLap) fi++;   // finish = next crossing a full lap later
-   if(fi>=cr.length) break;
-   const b=cr[fi];
-   laps.push({a, b, time:b-a, rows:pts.filter(g=>g.t>=a&&g.t<=b)});
-   // next lap starts at the finish (continuous), or after the cooldown gap
-   li=fi;
-   if(cool>0) while(li<cr.length && cr[li]<b+cool) li++;
-  }
+ const det=detectLaps(pts,t);
+ let laps=det.laps;
+ if(!laps.length && det.crossesSF===0 && !stage){
+  // no crossings at all is worth a plain explanation before the whole-run fallback
+  anaMsg(`The driven line never crosses the start/finish of "${t.name}" at speed. Right track selected, and is the line placed across your path?`);
  }
  // no gate crossings detected — still show the raw traces for the whole
  // recording so a lapless session isn't a dead end
  let wholeRun=false;
  if(!laps.length){
   wholeRun=true;
-  laps=[{a:pts[0].t, b:pts[pts.length-1].t, time:pts[pts.length-1].t-pts[0].t, rows:pts.slice(), sec:[]}];
+  laps=[{n:1, a:pts[0].t, b:pts[pts.length-1].t, time:pts[pts.length-1].t-pts[0].t, rows:pts.slice(), sec:[], out:false}];
  }
- laps.forEach((l,i)=>l.n=i+1);
  const best=laps.reduce((a,b)=>a.time<b.time?a:b);
- // sectors from this track's split gates (any number of them)
- const splitCr={};
- for(const g of splitGates()) splitCr[g.id]=gateCrossTimes(pts,g);
- for(const l of laps){
-  l.sec=[]; let last=l.a;
-  for(const g of splitGates()){
-   const c=splitCr[g.id].find(x=>x>l.a&&x<l.b);
-   if(c!==undefined){ l.sec.push(c-last); last=c; } else l.sec.push(null);
-  }
-  if(l.sec.length) l.sec.push(l.b-last);
- }
  renderAnalysis(laps,best,I,fname,computeAccel(pts));
  if(wholeRun) anaMsg("No start/finish crossings found — showing the whole recording. "
   +"Check the right track is selected and its lines are placed across your path.");
@@ -5047,6 +5462,7 @@ function speedColor(v,lo,hi){
  return `hsl(${240-240*f},90%,55%)`;
 }
 function lapElapsedAt(l,frac){
+ if(!l.rows || l.rows.length<2) return 0;
  const d0=l.rows[0].d, dTot=l.rows[l.rows.length-1].d-d0||1;
  const target=d0+frac*dTot;
  let i=l.rows.findIndex(p=>p.d>=target);
@@ -5138,14 +5554,20 @@ function computeCoach(laps,best){
   if(brakes.length){
    const longest=brakes.reduce((a,b)=>dur(b)>dur(a)?b:a);
    rows.push({t:R[longest.i0].t,
-    txt:`${brakes.length} braking zones; the longest lasts ${dur(longest).toFixed(1)}s into ~${pctAt(longest.i1)}% — prime spot to try braking later/harder.`});
+    txt:`${brakes.length} braking zones; the longest is ${dur(longest).toFixed(1)}s, ending at ~${pctAt(longest.i1)}%. Long braking usually means a fast approach, not a weak corner — compare its entry speed lap to lap before changing your braking point.`});
   }
   // top speed + peak corner
   const iV=R.reduce((a,b,i)=>R[a].spd>=b.spd?a:i,0);
   rows.push({t:R[iV].t, txt:`Top speed ${kmhOrMph(R[iV].spd).toFixed(0)} ${speedUnit()} at ~${pctAt(iV)}%.`});
-  let iG=0; for(let i=0;i<R.length;i++) if(Math.abs(R[i].ay||0)>Math.abs(R[iG].ay||0)) iG=i;
-  if(Math.abs(R[iG].ay||0)>0.4)
-   rows.push({t:R[iG].t, txt:`Peak cornering ${Math.abs(R[iG].ay).toFixed(1)}g at ~${pctAt(iG)}% — your grip ceiling today; corners well below it have margin left.`});
+  // peak cornering over a ~0.25 s window (a single 50 Hz sample is a kerb strike)
+  let iG=0, gBest=0;
+  for(let i=0;i<R.length;i++){
+   let sum=0,n=0;
+   for(let k=i;k<R.length && R[k].t-R[i].t<=0.25;k++){ sum+=Math.abs(R[k].ay||0); n++; }
+   const m=n?sum/n:0; if(m>gBest){ gBest=m; iG=i; }
+  }
+  if(gBest>0.4)
+   rows.push({t:R[iG].t, txt:`Peak cornering ${gBest.toFixed(1)}g (sustained) at ~${pctAt(iG)}% — today's grip ceiling; corners well below it have margin left.`});
  }
  return rows;
 }
@@ -5165,7 +5587,9 @@ function renderCoach(laps,best){
  const s=anaSessionId?db.sessions.find(x=>x.id===anaSessionId):null;
  const v=(s && !s.imported && s.trackId)?(db.venues||{})[s.trackId]:null;
  const corners=(v&&v.corners)||null;
- const R=subject.rows, d0=R[0].d, dTot=R[R.length-1].d-d0||1;
+ const R=subject.rows;
+ if(!R || R.length<2){ el.innerHTML='<div class="muted">Not enough data in this lap to coach.</div>'; return; }
+ const d0=R[0].d, dTot=R[R.length-1].d-d0||1;
  const fracOfT=t=>{
   let lo=0, hi=R.length-1;
   while(lo<hi){ const m=(lo+hi)>>1; if(R[m].t<t) lo=m+1; else hi=m; }
@@ -5185,7 +5609,7 @@ function renderCoach(laps,best){
   head+=`<div style="font-weight:700">Venue PB ${fmt(v.pb.time)}${best.time<=v.pb.time+0.001?" — set this session":""}`
    +(corners?` · ${corners.length} corners mapped`:"")+`</div>`;
  if(v && v.focus)
-  head+=`<div style="margin-top:3px">🎯 Focus: <b>T${v.focus.corner}</b> — ${v.focus.text}
+  head+=`<div style="margin-top:3px">🎯 Focus: <b>T${v.focus.corner}</b> — ${esc(v.focus.text)}
     <button class="minib" style="font-size:.75em" onclick="clearFocus(${s.trackId})">CLEAR</button></div>`;
  let body=rows.map(r=>{
   const c=r.t!=null?cornerOf(r.t):null;
@@ -5244,7 +5668,8 @@ function speedAtFrac(l,frac){
  const a=l.rows[i-1], b=l.rows[i], f=(target-a.d)/((b.d-a.d)||1);
  return a.spd+f*(b.spd-a.spd);
 }
-let anaLaps=null;
+let anaLaps=null, anaLapsSess=null;   // which session anaLaps was computed FOR —
+                                      // guards rerenderRuns against stale laps
 // ================= the compare module =================
 // One lap vs another — from this session, an earlier outing, or a friend's
 // imported/shared session — with a scrubber that walks all three views at
@@ -5260,7 +5685,7 @@ function fillCmpSrc(){
  const sel=document.getElementById("cmpSrc"); if(!sel) return;
  const others=[...db.sessions].filter(s=>s.id!==anaSessionId).sort((a,b)=>b.startedAt-a.startedAt);
  sel.innerHTML=`<option value="this">vs this session</option>`
-  +others.map(s=>`<option value="${s.id}">vs ${sessLabel(s)}</option>`).join("");
+  +others.map(s=>`<option value="${s.id}">vs ${esc(sessLabel(s))}</option>`).join("");
  cmp.otherLaps=null; cmp.otherLabel="";
 }
 function cmpSrcChange(){
@@ -5331,8 +5756,10 @@ function drawCompare(){
   const cW=document.getElementById("cmpmap").clientWidth||300;
   const [x,w,h]=cv2d("cmpmap",Math.round(cW*0.55));
   const rows=A.rows;
-  const xs=rows.map(p=>p.x), ys=rows.map(p=>p.y);
-  const x0=Math.min(...xs),x1=Math.max(...xs),y0=Math.min(...ys),y1=Math.max(...ys);
+  // loops, not spread: a whole-run "lap" can be 200k rows and Math.min(...)
+  // throws RangeError past ~120k arguments
+  let x0=Infinity,x1=-Infinity,y0=Infinity,y1=-Infinity;
+  for(const p of rows){ if(p.x<x0)x0=p.x; if(p.x>x1)x1=p.x; if(p.y<y0)y0=p.y; if(p.y>y1)y1=p.y; }
   const sc=Math.min((w-20)/(x1-x0||1),(h-20)/(y1-y0||1));
   const d0=rows[0].d, dTot=rows[rows.length-1].d-d0||1;
   x.lineWidth=5; x.lineCap="round";
@@ -5351,13 +5778,13 @@ function drawCompare(){
   x.fillStyle="#fff"; x.beginPath(); x.arc(cx,cy,7,0,7); x.fill();
   x.fillStyle="#1A1A1A"; x.beginPath(); x.arc(cx,cy,4.5,0,7); x.fill();
   x.fillStyle="#888"; x.font="11px sans-serif"; x.textAlign="left";
-  x.fillText(`green = ${nameA} faster here · red = ${nameB} faster`,10,14);
+  x.fillText(`green = ${nameA} faster here · red = ${nameB} faster`,10,h-6);   // below the track, not over it
  }
  // --- speed overlay
  {
   const [x,w,h]=cv2d("cmpspd",120);
   cornerBands(x,w,h,corners);
-  const vmax=Math.max(...cmp.sA,...cmp.sB)*1.05||1;
+  let vmax=0; for(const v of cmp.sA) if(v>vmax) vmax=v; for(const v of cmp.sB) if(v>vmax) vmax=v; vmax=vmax*1.05||1;
   const line=(arr,color,width)=>{
    x.strokeStyle=color; x.lineWidth=width; x.beginPath();
    arr.forEach((v,i)=>{
@@ -5414,7 +5841,7 @@ function drawCompare(){
 function cmpScrubMove(val){ cmp.frac=val/1000; drawCompare(); }
 function renderAnalysis(laps,best,I,fname,accel){
  document.getElementById("anaout").style.display="block";
- anaLaps=laps;
+ anaLaps=laps; anaLapsSess=anaSessionId;
  renderAccelResults(accel);
  // theme-aware canvas colours (charts used to be hard-coded for the dark theme,
  // so the white "best lap" line vanished on the light theme)
@@ -5431,10 +5858,17 @@ function renderAnalysis(laps,best,I,fname,accel){
  // (compare module stays even with one lap — other sessions can supply lap B)
  const nSec=Math.max(...laps.map(l=>l.sec.length));
  const nOut=laps.filter(l=>l.out).length;
- document.getElementById("anasum").textContent=
-  `${fname} — ${laps.length} laps, best ${fmtT(best.time)} (lap ${best.n})`
-  +(nOut?` · ${nOut} out-lap${nOut===1?"":"s"} excluded`:"")
-  +" · recomputed from the recording (sector-capable; may differ ~0.1–0.2 s from line-timed)";
+ {
+  // for a saved session the headline is the SAME number the History card and
+  // debrief show (sessionBest); implementation detail lives in the title tip
+  const sess=anaSessionId?db.sessions.find(x=>x.id===anaSessionId):null;
+  const headline=sess&&sessionBest(sess)!=null?sessionBest(sess):best.time;
+  const nl=sess?Math.max(laps.length-nOut, sessionLapCount(sess)):laps.length-nOut;
+  const el=document.getElementById("anasum");
+  el.textContent=`${nl} ${nl===1?"lap":"laps"} · best ${fmtT(headline)}`
+   +(nOut?` · ${nOut} out-lap${nOut===1?"":"s"} excluded`:"");
+  el.title="Lap times are taken at the line; sectors and zones are recomputed from the recording (±0.1–0.2 s).";
+ }
  document.getElementById("anahead").innerHTML=
   "<th>Lap</th><th>Time</th><th>Delta</th>"
   +Array.from({length:nSec},(_,i)=>`<th>S${i+1}</th>`).join("");
@@ -5463,8 +5897,12 @@ function renderAnalysis(laps,best,I,fname,accel){
  cmp.frac=0.5;
  const scb=document.getElementById("cmpScrub"); if(scb) scb.value=500;
  renderCompare();
- // --- g-g
- {
+ // --- g-g (only when there is longitudinal g to plot — a 10 Hz phone trail
+ // carries no ax, and the "diagram" was a flat horizontal line)
+ const ggCard=document.getElementById("anagg").closest(".card");
+ const hasAx=I.some(s=>Math.abs(s.ax||0)>0.02);
+ if(ggCard) ggCard.style.display=hasAx?"":"none";
+ if(hasAx){
   const [x,w,h]=cv2d("anagg",Math.min(260,document.getElementById("anagg").clientWidth||260));
   const cx=w/2, cy=h/2, R=Math.min(w,h)/2-14;
   x.strokeStyle=AX;
@@ -5521,4 +5959,9 @@ setTimeout(initMini,150);   // live dashboard (incl. minimap) shows from load no
   .catch(e=>alert("Couldn't load the shared session: "+(e.message||e)));
 })();
 autoConnect();   // silently re-link the last paired logger if it's in range
+// offline app shell: index.html + Leaflet cached by the service worker, so
+// "Add to Home screen" opens and times laps with zero signal
+if("serviceWorker" in navigator && location.protocol==="https:"){
+ navigator.serviceWorker.register("sw.js").catch(()=>{});
+}
 </script></body></html>
